@@ -13,6 +13,9 @@ const SUPPORTED = [
   ".mpeg", ".mpga", ".flac", ".webm",
 ];
 
+// Límite de payload de Vercel (~4.5 MB). Los audios más grandes se derivan a la app de escritorio.
+const WEB_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
+
 type Project = { id: string; name: string; icon: string };
 type Status = "pending" | "working" | "done" | "duplicate" | "error";
 type Item = { key: string; file: File; status: Status; resultId?: string; error?: string };
@@ -106,6 +109,14 @@ export function TranscribeWorkspace({
 
     // Procesar en serie (respeta la cuota de Groq y da progreso claro).
     for (const item of toProcess) {
+      // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app.
+      if (item.file.size > WEB_MAX_BYTES) {
+        patch(item.key, {
+          status: "error",
+          error: "Muy grande para la web (+4,5 MB). Usá la app de escritorio.",
+        });
+        continue;
+      }
       patch(item.key, { status: "working", error: undefined });
       try {
         const form = new FormData();
@@ -134,6 +145,7 @@ export function TranscribeWorkspace({
   const dashboardHref = destino && destino !== "__new__" ? `/app?project=${destino}` : "/app";
   const doneCount = items.filter((i) => i.status === "done" || i.status === "duplicate").length;
   const allDone = items.length > 0 && items.every((i) => i.status !== "pending" && i.status !== "working");
+  const hasOversize = items.some((i) => i.file.size > WEB_MAX_BYTES);
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-8">
@@ -256,6 +268,17 @@ export function TranscribeWorkspace({
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Derivación a la app de escritorio para archivos grandes (límite de Vercel) */}
+      {hasOversize && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Algunos audios pesan más de 4,5 MB y la web no los soporta.{" "}
+          <Link href="/descargar" className="font-semibold underline hover:text-amber-900">
+            Descargá la app de escritorio
+          </Link>{" "}
+          para sincronizar archivos grandes sin límite.
+        </div>
       )}
 
       {topError && <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{topError}</p>}

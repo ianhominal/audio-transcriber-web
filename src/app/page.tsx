@@ -33,8 +33,8 @@ export default async function Landing() {
           Tus audios, convertidos en <span className="text-indigo-600">texto</span> en segundos.
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-lg text-slate-600">
-          Subí una nota de voz o cualquier audio y obtené la transcripción al instante. Español y
-          decenas de idiomas, con IA de última generación.
+          Esa nota de voz de dos minutos que no tenés ganas de escuchar: subila y leela en segundos.
+          Notas de WhatsApp, reuniones, clases, lo que sea. Español, inglés y más.
         </p>
         <div className="mt-8 flex justify-center gap-3">
           <Link
@@ -48,9 +48,9 @@ export default async function Landing() {
       </section>
 
       <section className="mx-auto grid max-w-4xl gap-4 px-5 pb-20 sm:grid-cols-3">
-        <Feature title="Rapidísimo" desc="Transcripción en segundos con Whisper sobre Groq." />
-        <Feature title="Multiidioma" desc="Español, inglés y muchos más. Detección automática." />
-        <Feature title="Tus notas, ordenadas" desc="Guardá y encontrá tus transcripciones cuando quieras." />
+        <Feature title="En segundos" desc="Subís el audio y el texto aparece casi al toque. Nada de esperar." />
+        <Feature title="Varios idiomas" desc="Español, inglés y más, con detección automática si no sabés cuál es." />
+        <Feature title="Todo en su lugar" desc="Guardás tus transcripciones en proyectos y las encontrás cuando las necesitás." />
       </section>
     </main>
   );

@@ -1,10 +1,16 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * Página pública de descarga del cliente desktop (sincronizador).
- * No requiere sesión: no usa Supabase ni auth.
+ * Es pública (cualquiera la ve), pero el header refleja si ya hay sesión.
  */
-export default function DescargarPage() {
+export default async function DescargarPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
@@ -15,10 +21,10 @@ export default function DescargarPage() {
           <span className="font-bold">Audio Transcriber</span>
         </Link>
         <Link
-          href="/login"
+          href={user ? "/app" : "/login"}
           className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-white"
         >
-          Iniciar sesión
+          {user ? "Ir a la app" : "Iniciar sesión"}
         </Link>
       </header>
 
