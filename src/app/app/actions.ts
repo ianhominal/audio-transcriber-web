@@ -125,6 +125,24 @@ export async function updateTranscriptionTitle(id: string, title: string): Promi
   return { ok: true };
 }
 
+/** Guarda título y texto juntos (el botón "Guardar" del detalle). */
+export async function updateTranscription(
+  id: string,
+  title: string,
+  text: string
+): Promise<ActionResult> {
+  const { supabase } = await requireUser();
+  const { error } = await supabase
+    .from("transcriptions")
+    .update({ title: title.trim().slice(0, 120), text })
+    .eq("id", id);
+  if (error) return { ok: false, error: "No se pudo guardar." };
+
+  revalidatePath(`/app/t/${id}`);
+  revalidatePath("/app");
+  return { ok: true };
+}
+
 export async function assignTranscriptionToProject(
   id: string,
   projectId: string | null

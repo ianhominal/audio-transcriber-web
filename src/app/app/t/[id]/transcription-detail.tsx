@@ -4,8 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDate, formatFileSize } from "@/lib/format";
 import {
-  updateTranscriptionText,
-  updateTranscriptionTitle,
+  updateTranscription,
   assignTranscriptionToProject,
   deleteTranscription,
 } from "../../actions";
@@ -39,24 +38,28 @@ export function TranscriptionDetail({
   const [text, setText] = useState(transcription.text);
   const [projectId, setProjectId] = useState<string | null>(transcription.project_id);
   const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const dirty = text !== transcription.text;
-
-  async function saveTitle() {
-    if (title === transcription.title) return;
-    const res = await updateTranscriptionTitle(transcription.id, title);
-    if (res.ok) transcription.title = title;
-  }
+  // Hay cambio real si cambió el título O el texto.
+  const dirty = title !== transcription.title || text !== transcription.text;
 
   async function save() {
+    if (!dirty) return;
     setSaving(true);
-    const res = await updateTranscriptionText(transcription.id, text);
+    setMsg(null);
+    const res = await updateTranscription(transcription.id, title, text);
     setSaving(false);
-    setMsg(res.ok ? "Guardado ✓" : res.error ?? "Error");
-    if (res.ok) transcription.text = text;
-    setTimeout(() => setMsg(null), 2500);
+    if (res.ok) {
+      transcription.title = title;
+      transcription.text = text;
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 2000);
+      router.refresh(); // refresca la lista/título en el resto de la app
+    } else {
+      setMsg(res.error ?? "No se pudo guardar.");
+    }
   }
 
   async function changeProject(value: string) {
@@ -113,10 +116,6 @@ export function TranscriptionDetail({
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onBlur={saveTitle}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-            }}
             placeholder={transcription.audio_name || "Sin título"}
             aria-label="Título de la transcripción"
             className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold text-slate-900 outline-none hover:border-slate-200 focus:border-indigo-400 focus:bg-white"
@@ -174,9 +173,13 @@ export function TranscriptionDetail({
         <button
           onClick={save}
           disabled={!dirty || saving}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${
+            justSaved
+              ? "bg-emerald-600"
+              : "bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+          }`}
         >
-          {saving ? "Guardando…" : "Guardar"}
+          {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
         </button>
         <button
           onClick={copy}
