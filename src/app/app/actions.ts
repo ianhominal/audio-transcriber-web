@@ -112,6 +112,19 @@ export async function updateTranscriptionText(id: string, text: string): Promise
   return { ok: true };
 }
 
+export async function updateTranscriptionTitle(id: string, title: string): Promise<ActionResult> {
+  const { supabase } = await requireUser();
+  const { error } = await supabase
+    .from("transcriptions")
+    .update({ title: title.trim().slice(0, 120) })
+    .eq("id", id);
+  if (error) return { ok: false, error: "No se pudo guardar el título." };
+
+  revalidatePath(`/app/t/${id}`);
+  revalidatePath("/app");
+  return { ok: true };
+}
+
 export async function assignTranscriptionToProject(
   id: string,
   projectId: string | null
@@ -145,5 +158,5 @@ export async function deleteTranscription(id: string): Promise<ActionResult> {
   if (error) return { ok: false, error: "No se pudo borrar la transcripción." };
 
   revalidatePath("/app");
-  redirect("/app");
+  return { ok: true };
 }

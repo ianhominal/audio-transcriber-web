@@ -6,6 +6,7 @@ import { TranscriptionRow } from "./transcription-row";
 
 type Transcription = {
   id: string;
+  title: string;
   audio_name: string;
   text: string;
   created_at: string;
@@ -41,7 +42,7 @@ export default async function Dashboard({
   // Lista filtrada.
   let query = supabase
     .from("transcriptions")
-    .select("id, audio_name, text, created_at, project_id")
+    .select("id, title, audio_name, text, created_at, project_id")
     .order("created_at", { ascending: false })
     .limit(100);
   if (filter === "none") query = query.is("project_id", null);
@@ -52,6 +53,9 @@ export default async function Dashboard({
   const activeProject = filter && filter !== "none" ? projects.find((p) => p.id === filter) : null;
   const heading =
     filter === "none" ? "Sin proyecto" : activeProject ? activeProject.name : "Todas las transcripciones";
+
+  // Al crear desde un proyecto, arrastramos ese proyecto como destino.
+  const newHref = activeProject ? `/app/transcribe?project=${activeProject.id}` : "/app/transcribe";
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6 px-5 py-8 md:grid-cols-[15rem_1fr]">
@@ -88,7 +92,7 @@ export default async function Dashboard({
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-slate-900">{heading}</h1>
           <Link
-            href="/app/transcribe"
+            href={newHref}
             className="rounded-lg bg-indigo-600 px-4 py-2.5 font-semibold text-white hover:bg-indigo-700"
           >
             + Nueva transcripción

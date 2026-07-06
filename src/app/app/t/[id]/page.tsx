@@ -15,7 +15,7 @@ export default async function TranscriptionPage({
   const [{ data: t }, { data: projectsData }] = await Promise.all([
     supabase
       .from("transcriptions")
-      .select("id, audio_name, audio_size, audio_url, text, language, model, project_id, created_at")
+      .select("id, title, audio_name, audio_size, audio_url, text, language, model, project_id, created_at")
       .eq("id", id)
       .single(),
     supabase.from("projects").select("id, name, icon").order("created_at", { ascending: true }),

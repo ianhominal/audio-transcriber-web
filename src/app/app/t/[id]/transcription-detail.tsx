@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatDate, formatFileSize } from "@/lib/format";
 import {
   updateTranscriptionText,
+  updateTranscriptionTitle,
   assignTranscriptionToProject,
   deleteTranscription,
 } from "../../actions";
 
 type Transcription = {
   id: string;
+  title: string;
   audio_name: string;
   audio_size: number;
   audio_url: string | null;
@@ -31,6 +34,8 @@ export function TranscriptionDetail({
   projects: Project[];
   audioSrc: string | null;
 }) {
+  const router = useRouter();
+  const [title, setTitle] = useState(transcription.title);
   const [text, setText] = useState(transcription.text);
   const [projectId, setProjectId] = useState<string | null>(transcription.project_id);
   const [saving, setSaving] = useState(false);
@@ -38,6 +43,12 @@ export function TranscriptionDetail({
   const [msg, setMsg] = useState<string | null>(null);
 
   const dirty = text !== transcription.text;
+
+  async function saveTitle() {
+    if (title === transcription.title) return;
+    const res = await updateTranscriptionTitle(transcription.id, title);
+    if (res.ok) transcription.title = title;
+  }
 
   async function save() {
     setSaving(true);
@@ -84,15 +95,35 @@ export function TranscriptionDetail({
   }
 
   async function remove() {
-    if (!confirm("¿Borrar esta transcripción? No se puede deshacer.")) return;
-    await deleteTranscription(transcription.id);
+    if (!confirm("¿Borrar esta transcripción? También se borra su audio. No se puede deshacer.")) return;
+    const res = await deleteTranscription(transcription.id);
+    if (res.ok) {
+      router.push("/app");
+      router.refresh();
+    } else {
+      setMsg(res.error ?? "No se pudo borrar.");
+    }
   }
 
   return (
     <div className="mt-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-2xl font-bold text-slate-900">{transcription.audio_name}</h1>
-        <span className="text-xs text-slate-400">{formatDate(transcription.created_at)}</span>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          {/* Título editable propio (independiente del nombre del archivo) */}
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            placeholder={transcription.audio_name || "Sin título"}
+            aria-label="Título de la transcripción"
+            className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold text-slate-900 outline-none hover:border-slate-200 focus:border-indigo-400 focus:bg-white"
+          />
+          <p className="mt-0.5 px-0.5 text-xs text-slate-400">🎵 {transcription.audio_name}</p>
+        </div>
+        <span className="shrink-0 pt-2 text-xs text-slate-400">{formatDate(transcription.created_at)}</span>
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">

@@ -13,6 +13,7 @@ import {
 
 type Transcription = {
   id: string;
+  title: string;
   audio_name: string;
   text: string;
   created_at: string;
@@ -29,6 +30,9 @@ export function TranscriptionRow({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false); // borrado optimista
+
+  const displayName = transcription.title || transcription.audio_name;
 
   async function moveTo(projectId: string | null) {
     setBusy(true);
@@ -52,8 +56,17 @@ export function TranscriptionRow({
 
   async function remove() {
     if (!confirm("¿Borrar esta transcripción? También se borra su audio. No se puede deshacer.")) return;
-    await deleteTranscription(transcription.id);
+    setHidden(true); // feedback inmediato
+    const res = await deleteTranscription(transcription.id);
+    if (res.ok) {
+      router.refresh();
+    } else {
+      setHidden(false); // si falla, la volvemos a mostrar
+      alert(res.error ?? "No se pudo borrar.");
+    }
   }
+
+  if (hidden) return null;
 
   return (
     <li
@@ -63,7 +76,7 @@ export function TranscriptionRow({
     >
       <Link href={`/app/t/${transcription.id}`} className="block min-w-0 flex-1 p-4">
         <div className="flex items-baseline justify-between gap-4">
-          <p className="truncate font-semibold text-slate-800">{transcription.audio_name}</p>
+          <p className="truncate font-semibold text-slate-800">{displayName}</p>
           <span className="shrink-0 text-xs text-slate-400">{formatDate(transcription.created_at)}</span>
         </div>
         <p className="mt-1 line-clamp-2 text-sm text-slate-600">

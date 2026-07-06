@@ -16,12 +16,18 @@ type Item = { key: string; file: File; status: Status; resultId?: string; error?
 let counter = 0;
 const nextKey = () => `f${++counter}`;
 
-export function TranscribeWorkspace({ projects }: { projects: Project[] }) {
+export function TranscribeWorkspace({
+  projects,
+  initialProject = "",
+}: {
+  projects: Project[];
+  initialProject?: string;
+}) {
   const router = useRouter();
-  const [destino, setDestino] = useState<string>(""); // "" | projectId | "__new__"
+  const [destino, setDestino] = useState<string>(initialProject); // "" | projectId | "__new__"
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("📁");
-  const [language, setLanguage] = useState("es");
+  const language = "es"; // audios en español; el selector se quitó por ser fricción innecesaria
   const [model, setModel] = useState("whisper-large-v3-turbo");
   const [items, setItems] = useState<Item[]>([]);
   const [running, setRunning] = useState(false);
@@ -155,13 +161,6 @@ export function TranscribeWorkspace({ projects }: { projects: Project[] }) {
 
         {/* Opciones compactas */}
         <div className="mt-4 flex flex-wrap gap-4">
-          <label className="flex flex-col text-sm">
-            <span className="mb-1 font-semibold text-slate-500">Idioma</span>
-            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2">
-              <option value="es">Español</option>
-              <option value="auto">Automático</option>
-            </select>
-          </label>
           <label className="flex flex-col text-sm">
             <span className="mb-1 font-semibold text-slate-500">Calidad</span>
             <select value={model} onChange={(e) => setModel(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2">

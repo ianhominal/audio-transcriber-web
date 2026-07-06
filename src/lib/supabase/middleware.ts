@@ -4,6 +4,11 @@ import { NextResponse, type NextRequest } from "next/server";
 /**
  * Refresca la sesión de Supabase en cada request y protege las rutas /app/*.
  * Sin sesión → redirect a /login.
+ *
+ * IMPORTANTE: al crear una respuesta nueva (redirect) hay que COPIAR las cookies
+ * de `supabaseResponse`. Supabase rota el refresh token en cada refresco; si esa
+ * cookie no viaja en el redirect, el navegador se queda con un token viejo y la
+ * sesión se corta (el usuario "se desloguea solo").
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -31,17 +36,22 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Crea un redirect preservando las cookies de sesión ya refrescadas.
+  const redirectTo = (pathname: string) => {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname;
+    const res = NextResponse.redirect(url);
+    supabaseResponse.cookies.getAll().forEach((cookie) => res.cookies.set(cookie));
+    return res;
+  };
+
   const path = request.nextUrl.pathname;
   if (!user && path.startsWith("/app")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return redirectTo("/login");
   }
   // Si ya está logueado y entra a /login, mandarlo al dashboard.
   if (user && path === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/app";
-    return NextResponse.redirect(url);
+    return redirectTo("/app");
   }
 
   return supabaseResponse;
