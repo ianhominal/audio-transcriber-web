@@ -54,7 +54,12 @@ cd audio-transcriber-web
 npm install
 ```
 
-1. Create a free project at [supabase.com](https://supabase.com/) and run [`supabase/schema.sql`](supabase/schema.sql) in the SQL editor.
+1. Create a free project at [supabase.com](https://supabase.com/), then apply the database schema:
+   ```bash
+   supabase link --project-ref YOUR_PROJECT_REF
+   supabase db push
+   ```
+   The schema lives as versioned migrations in [`supabase/migrations/`](supabase/migrations/).
 2. Copy `.env.example` → `.env.local` and fill in your Supabase keys and a [Groq API key](https://console.groq.com/keys).
 3. Start it:
 
