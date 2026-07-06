@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
+import { AUDIO_BUCKET, audioExtension, buildAudioObjectPath } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -89,12 +91,30 @@ export async function POST(req: NextRequest) {
 
   const text = (data.text ?? "").trim();
 
-  // 3) Guardar la transcripción (best-effort; si falla el guardado, igual devolvemos el texto).
+  // 3) Subir el audio a Storage (bucket privado, carpeta del usuario). Best-effort:
+  //    si falla la subida, igual guardamos el texto (sin audio).
+  let audioPath: string | null = null;
+  try {
+    const ext = audioExtension(file.name || "");
+    const path = buildAudioObjectPath(user.id, randomUUID(), ext);
+    const { error: upErr } = await supabase.storage
+      .from(AUDIO_BUCKET)
+      .upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false,
+      });
+    if (!upErr) audioPath = path;
+  } catch {
+    /* seguir sin audio */
+  }
+
+  // 4) Guardar la transcripción (best-effort; si falla, igual devolvemos el texto).
   try {
     await supabase.from("transcriptions").insert({
       user_id: user.id,
       audio_name: file.name || "audio",
       audio_size: file.size,
+      audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
       text,
       language,
       model,
