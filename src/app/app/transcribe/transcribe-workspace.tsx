@@ -7,7 +7,11 @@ import { createProject } from "../actions";
 import { EmojiPicker } from "../emoji-picker";
 import { formatFileSize } from "@/lib/format";
 
-const SUPPORTED = [".mp3", ".wav", ".ogg", ".opus", ".m4a", ".mp4", ".flac", ".webm"];
+// Formatos que Groq/Whisper acepta nativamente (mp4/mpeg incluidos: extrae el audio del video).
+const SUPPORTED = [
+  ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".mp4",
+  ".mpeg", ".mpga", ".flac", ".webm",
+];
 
 type Project = { id: string; name: string; icon: string };
 type Status = "pending" | "working" | "done" | "duplicate" | "error";
