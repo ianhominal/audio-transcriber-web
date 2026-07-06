@@ -15,7 +15,9 @@ export default async function TranscriptionPage({
   const [{ data: t }, { data: projectsData }] = await Promise.all([
     supabase
       .from("transcriptions")
-      .select("id, title, audio_name, audio_size, audio_url, text, language, model, project_id, created_at")
+      .select(
+        "id, title, audio_name, audio_size, audio_url, text, description, icon, language, model, project_id, created_at"
+      )
       .eq("id", id)
       .is("deleted_at", null)
       .single(),

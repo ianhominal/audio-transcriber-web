@@ -16,7 +16,7 @@ export const runtime = "nodejs";
  * Body:
  * {
  *   projects?:       { upserts?: [{ id, name, icon?, description? }], deletes?: string[] },
- *   transcriptions?: { upserts?: [{ id, title?, text?, project_id? }], deletes?: string[] }
+ *   transcriptions?: { upserts?: [{ id, title?, text?, description?, icon?, project_id? }], deletes?: string[] }
  * }
  */
 export async function POST(req: NextRequest) {
@@ -72,6 +72,8 @@ export async function POST(req: NextRequest) {
     const update: Record<string, unknown> = {};
     if (t.title !== undefined) update.title = t.title.slice(0, 120);
     if (t.text !== undefined) update.text = t.text;
+    if (t.description !== undefined) update.description = t.description.slice(0, 2000);
+    if (t.icon !== undefined) update.icon = t.icon.slice(0, 8);
     if (t.project_id !== undefined) update.project_id = t.project_id;
     if (Object.keys(update).length === 0) continue;
 
@@ -106,7 +108,14 @@ type PushBody = {
     deletes?: string[];
   };
   transcriptions?: {
-    upserts?: { id: string; title?: string; text?: string; project_id?: string | null }[];
+    upserts?: {
+      id: string;
+      title?: string;
+      text?: string;
+      description?: string;
+      icon?: string;
+      project_id?: string | null;
+    }[];
     deletes?: string[];
   };
 };

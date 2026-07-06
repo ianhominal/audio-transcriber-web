@@ -9,6 +9,7 @@ type Transcription = {
   title: string;
   audio_name: string;
   text: string;
+  icon: string;
   created_at: string;
   project_id: string | null;
 };
@@ -46,7 +47,7 @@ export default async function Dashboard({
   // Lista filtrada.
   let query = supabase
     .from("transcriptions")
-    .select("id, title, audio_name, text, created_at, project_id")
+    .select("id, title, audio_name, text, icon, created_at, project_id")
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(100);

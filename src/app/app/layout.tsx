@@ -22,6 +22,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Audio Transcriber
           </Link>
           <div className="flex items-center gap-3">
+            <Link href="/descargar" className="text-sm font-medium text-slate-500 hover:text-indigo-600">
+              Descargar app ↓
+            </Link>
             <span className="hidden text-sm text-slate-500 sm:inline">{user.email}</span>
             <LogoutButton />
           </div>

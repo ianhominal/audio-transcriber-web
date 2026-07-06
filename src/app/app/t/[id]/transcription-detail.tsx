@@ -8,6 +8,7 @@ import {
   assignTranscriptionToProject,
   deleteTranscription,
 } from "../../actions";
+import { EmojiPicker } from "../../emoji-picker";
 
 type Transcription = {
   id: string;
@@ -16,6 +17,8 @@ type Transcription = {
   audio_size: number;
   audio_url: string | null;
   text: string;
+  description: string;
+  icon: string;
   language: string;
   model: string;
   project_id: string | null;
@@ -36,24 +39,32 @@ export function TranscriptionDetail({
   const router = useRouter();
   const [title, setTitle] = useState(transcription.title);
   const [text, setText] = useState(transcription.text);
+  const [description, setDescription] = useState(transcription.description);
+  const [icon, setIcon] = useState(transcription.icon);
   const [projectId, setProjectId] = useState<string | null>(transcription.project_id);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Hay cambio real si cambió el título O el texto.
-  const dirty = title !== transcription.title || text !== transcription.text;
+  // Hay cambio real si cambió el título, el texto, la descripción o el ícono.
+  const dirty =
+    title !== transcription.title ||
+    text !== transcription.text ||
+    description !== transcription.description ||
+    icon !== transcription.icon;
 
   async function save() {
     if (!dirty) return;
     setSaving(true);
     setMsg(null);
-    const res = await updateTranscription(transcription.id, title, text);
+    const res = await updateTranscription(transcription.id, { title, text, description, icon });
     setSaving(false);
     if (res.ok) {
       transcription.title = title;
       transcription.text = text;
+      transcription.description = description;
+      transcription.icon = icon;
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 2000);
       router.refresh(); // refresca la lista/título en el resto de la app
@@ -111,16 +122,19 @@ export function TranscriptionDetail({
   return (
     <div className="mt-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          {/* Título editable propio (independiente del nombre del archivo) */}
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder={transcription.audio_name || "Sin título"}
-            aria-label="Título de la transcripción"
-            className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold text-slate-900 outline-none hover:border-slate-200 focus:border-indigo-400 focus:bg-white"
-          />
-          <p className="mt-0.5 px-0.5 text-xs text-slate-400">🎵 {transcription.audio_name}</p>
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <EmojiPicker value={icon} onChange={setIcon} />
+          <div className="min-w-0 flex-1">
+            {/* Título editable propio (independiente del nombre del archivo) */}
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={transcription.audio_name || "Sin título"}
+              aria-label="Título de la transcripción"
+              className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold text-slate-900 outline-none hover:border-slate-200 focus:border-indigo-400 focus:bg-white"
+            />
+            <p className="mt-0.5 px-0.5 text-xs text-slate-400">🎵 {transcription.audio_name}</p>
+          </div>
         </div>
         <span className="shrink-0 pt-2 text-xs text-slate-400">{formatDate(transcription.created_at)}</span>
       </div>
@@ -130,6 +144,15 @@ export function TranscriptionDetail({
         <Badge>{transcription.language}</Badge>
         {transcription.audio_size > 0 && <Badge>{formatFileSize(transcription.audio_size)}</Badge>}
       </div>
+
+      {/* Descripción / notas */}
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={3}
+        placeholder="Descripción o notas (opcional)…"
+        className="mt-4 w-full resize-y rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none"
+      />
 
       {/* Reproductor: usa una URL firmada temporal (bucket privado). */}
       {audioSrc ? (

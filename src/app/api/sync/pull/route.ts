@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   let transcriptionsQuery = supabase
     .from("transcriptions")
     .select(
-      "id, project_id, title, audio_name, audio_size, audio_url, text, language, model, created_at, updated_at, deleted_at"
+      "id, project_id, title, audio_name, audio_size, audio_url, text, description, icon, language, model, created_at, updated_at, deleted_at"
     )
     .eq("user_id", user.id);
 

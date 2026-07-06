@@ -16,6 +16,7 @@ type Transcription = {
   title: string;
   audio_name: string;
   text: string;
+  icon: string;
   created_at: string;
   project_id: string | null;
 };
@@ -76,7 +77,10 @@ export function TranscriptionRow({
     >
       <Link href={`/app/t/${transcription.id}`} className="block min-w-0 flex-1 p-4">
         <div className="flex items-baseline justify-between gap-4">
-          <p className="truncate font-semibold text-slate-800">{displayName}</p>
+          <p className="truncate font-semibold text-slate-800">
+            <span className="mr-1.5">{transcription.icon || "📄"}</span>
+            {displayName}
+          </p>
           <span className="shrink-0 text-xs text-slate-400">{formatDate(transcription.created_at)}</span>
         </div>
         <p className="mt-1 line-clamp-2 text-sm text-slate-600">

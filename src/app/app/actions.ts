@@ -128,16 +128,20 @@ export async function updateTranscriptionTitle(id: string, title: string): Promi
   return { ok: true };
 }
 
-/** Guarda título y texto juntos (el botón "Guardar" del detalle). */
+/** Guarda título, texto, descripción e ícono juntos (el botón "Guardar" del detalle). */
 export async function updateTranscription(
   id: string,
-  title: string,
-  text: string
+  fields: { title: string; text: string; description: string; icon: string }
 ): Promise<ActionResult> {
   const { supabase } = await requireUser();
   const { error } = await supabase
     .from("transcriptions")
-    .update({ title: title.trim().slice(0, 120), text })
+    .update({
+      title: fields.title.trim().slice(0, 120),
+      text: fields.text,
+      description: fields.description.slice(0, 2000),
+      icon: fields.icon.slice(0, 8),
+    })
     .eq("id", id);
   if (error) return { ok: false, error: "No se pudo guardar." };
 
