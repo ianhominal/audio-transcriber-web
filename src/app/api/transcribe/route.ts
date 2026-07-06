@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { createClient } from "@/lib/supabase/server";
+import { getApiUser } from "@/lib/supabase/api";
 import { AUDIO_BUCKET, audioExtension, buildAudioObjectPath } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -13,11 +13,8 @@ const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions";
  * La clave de Groq vive SOLO en el servidor (GROQ_API_KEY).
  */
 export async function POST(req: NextRequest) {
-  // 1) Sesión obligatoria (protege la cuota de Groq y asocia el resultado al usuario).
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 1) Sesión obligatoria (cookies web o Bearer del cliente desktop).
+  const { supabase, user } = await getApiUser(req);
   if (!user) {
     return NextResponse.json({ error: "Necesitás iniciar sesión." }, { status: 401 });
   }
@@ -59,6 +56,7 @@ export async function POST(req: NextRequest) {
     .eq("user_id", user.id)
     .eq("audio_name", audioName)
     .eq("audio_size", file.size)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

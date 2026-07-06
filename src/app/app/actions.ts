@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { validateProjectName } from "@/lib/format";
-import { AUDIO_BUCKET } from "@/lib/storage";
 
 /** Devuelve el usuario autenticado o corta con redirect a /login. */
 async function requireUser() {
@@ -92,8 +91,12 @@ export async function duplicateProject(id: string): Promise<ActionResult> {
 
 export async function deleteProject(id: string): Promise<ActionResult> {
   const { supabase } = await requireUser();
-  // Las transcripciones quedan (project_id → null por la FK on delete set null).
-  const { error } = await supabase.from("projects").delete().eq("id", id);
+  // Papelera (soft delete): las transcripciones quedan sin proyecto, no se borran.
+  await supabase.from("transcriptions").update({ project_id: null }).eq("project_id", id);
+  const { error } = await supabase
+    .from("projects")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
   if (error) return { ok: false, error: "No se pudo borrar el proyecto." };
 
   revalidatePath("/app");
@@ -162,17 +165,12 @@ export async function assignTranscriptionToProject(
 export async function deleteTranscription(id: string): Promise<ActionResult> {
   const { supabase } = await requireUser();
 
-  // Borrar también el audio de Storage (best-effort).
-  const { data: row } = await supabase
+  // Papelera (soft delete): el audio en Storage se conserva por si hay que recuperar.
+  // La purga definitiva (Storage incluido) la hará un job a los ~30 días.
+  const { error } = await supabase
     .from("transcriptions")
-    .select("audio_url")
-    .eq("id", id)
-    .single();
-  if (row?.audio_url) {
-    await supabase.storage.from(AUDIO_BUCKET).remove([row.audio_url]);
-  }
-
-  const { error } = await supabase.from("transcriptions").delete().eq("id", id);
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
   if (error) return { ok: false, error: "No se pudo borrar la transcripción." };
 
   revalidatePath("/app");

@@ -24,8 +24,12 @@ export default async function Dashboard({
   const supabase = await createClient();
 
   const [{ data: projectsData }, { data: countRows }] = await Promise.all([
-    supabase.from("projects").select("id, name, icon").order("created_at", { ascending: true }),
-    supabase.from("transcriptions").select("project_id"),
+    supabase
+      .from("projects")
+      .select("id, name, icon")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true }),
+    supabase.from("transcriptions").select("project_id").is("deleted_at", null),
   ]);
 
   const projects = (projectsData ?? []) as Project[];
@@ -43,6 +47,7 @@ export default async function Dashboard({
   let query = supabase
     .from("transcriptions")
     .select("id, title, audio_name, text, created_at, project_id")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(100);
   if (filter === "none") query = query.is("project_id", null);

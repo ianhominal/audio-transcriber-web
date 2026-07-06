@@ -17,8 +17,13 @@ export default async function TranscriptionPage({
       .from("transcriptions")
       .select("id, title, audio_name, audio_size, audio_url, text, language, model, project_id, created_at")
       .eq("id", id)
+      .is("deleted_at", null)
       .single(),
-    supabase.from("projects").select("id, name, icon").order("created_at", { ascending: true }),
+    supabase
+      .from("projects")
+      .select("id, name, icon")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true }),
   ]);
 
   if (!t) notFound();

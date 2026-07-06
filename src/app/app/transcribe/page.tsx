@@ -11,6 +11,7 @@ export default async function TranscribePage({
   const { data: projects } = await supabase
     .from("projects")
     .select("id, name, icon")
+    .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
   // Solo preseleccionamos si el proyecto existe realmente.
