@@ -2,15 +2,18 @@
 
 import { useRef, useState } from "react";
 import { createProject } from "./actions";
+import { EmojiPicker } from "./emoji-picker";
 
 /** Botón + formulario inline para crear un proyecto. */
 export function NewProjectButton() {
   const [open, setOpen] = useState(false);
+  const [icon, setIcon] = useState("📁");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   async function handle(formData: FormData) {
+    formData.set("icon", icon);
     setPending(true);
     const res = await createProject(formData);
     setPending(false);
@@ -20,6 +23,7 @@ export function NewProjectButton() {
     }
     setError(null);
     setOpen(false);
+    setIcon("📁");
     formRef.current?.reset();
   }
 
@@ -37,13 +41,7 @@ export function NewProjectButton() {
   return (
     <form ref={formRef} action={handle} className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
       <div className="flex gap-2">
-        <input
-          name="icon"
-          maxLength={2}
-          placeholder="📁"
-          className="w-10 shrink-0 rounded-md border border-slate-300 px-2 py-1.5 text-center"
-          aria-label="Ícono del proyecto"
-        />
+        <EmojiPicker value={icon} onChange={setIcon} />
         <input
           name="name"
           autoFocus

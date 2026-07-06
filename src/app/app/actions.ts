@@ -17,38 +17,74 @@ async function requireUser() {
 }
 
 export type ActionResult = { ok: boolean; error?: string };
+export type CreateProjectResult = { ok: true; id: string } | { ok: false; error: string };
 
 // ---------------- Proyectos ----------------
 
-export async function createProject(formData: FormData): Promise<ActionResult> {
+export async function createProject(formData: FormData): Promise<CreateProjectResult> {
   const parsed = validateProjectName(String(formData.get("name") ?? ""));
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   const { supabase, user } = await requireUser();
   const icon = String(formData.get("icon") ?? "").slice(0, 8);
 
-  const { error } = await supabase.from("projects").insert({
-    user_id: user.id,
+  const { data, error } = await supabase
+    .from("projects")
+    .insert({
+      user_id: user.id,
+      name: parsed.value,
+      title: parsed.value,
+      icon,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { ok: false, error: "No se pudo crear el proyecto." };
+
+  revalidatePath("/app");
+  return { ok: true, id: data.id };
+}
+
+export async function renameProject(
+  id: string,
+  name: string,
+  icon?: string
+): Promise<ActionResult> {
+  const parsed = validateProjectName(name);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  const { supabase } = await requireUser();
+  const update: Record<string, string> = {
     name: parsed.value,
     title: parsed.value,
-    icon,
-  });
-  if (error) return { ok: false, error: "No se pudo crear el proyecto." };
+    updated_at: new Date().toISOString(),
+  };
+  if (icon !== undefined) update.icon = icon.slice(0, 8);
+
+  const { error } = await supabase.from("projects").update(update).eq("id", id);
+  if (error) return { ok: false, error: "No se pudo renombrar el proyecto." };
 
   revalidatePath("/app");
   return { ok: true };
 }
 
-export async function renameProject(id: string, name: string): Promise<ActionResult> {
-  const parsed = validateProjectName(name);
-  if (!parsed.ok) return { ok: false, error: parsed.error };
-
-  const { supabase } = await requireUser();
-  const { error } = await supabase
+export async function duplicateProject(id: string): Promise<ActionResult> {
+  const { supabase, user } = await requireUser();
+  const { data: orig } = await supabase
     .from("projects")
-    .update({ name: parsed.value, title: parsed.value, updated_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) return { ok: false, error: "No se pudo renombrar el proyecto." };
+    .select("name, icon, description")
+    .eq("id", id)
+    .single();
+  if (!orig) return { ok: false, error: "No se encontró el proyecto." };
+
+  // Duplica la carpeta (no las transcripciones que contiene).
+  const { error } = await supabase.from("projects").insert({
+    user_id: user.id,
+    name: `Copia de ${orig.name}`,
+    title: `Copia de ${orig.name}`,
+    icon: orig.icon ?? "",
+    description: orig.description ?? "",
+  });
+  if (error) return { ok: false, error: "No se pudo duplicar el proyecto." };
 
   revalidatePath("/app");
   return { ok: true };

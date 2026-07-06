@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { formatDate } from "@/lib/format";
 import { NewProjectButton } from "./new-project-button";
+import { ProjectRow } from "./project-row";
+import { TranscriptionRow } from "./transcription-row";
 
 type Transcription = {
   id: string;
@@ -63,13 +64,11 @@ export default async function Dashboard({
           <nav className="space-y-0.5">
             <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
             {projects.map((p) => (
-              <SidebarLink
+              <ProjectRow
                 key={p.id}
-                href={`/app?project=${p.id}`}
+                project={p}
                 active={filter === p.id}
-                label={p.name}
                 count={counts.get(p.id) ?? 0}
-                icon={p.icon || "📁"}
               />
             ))}
             <SidebarLink
@@ -106,20 +105,7 @@ export default async function Dashboard({
         ) : (
           <ul className="mt-6 space-y-3">
             {items.map((t) => (
-              <li key={t.id}>
-                <Link
-                  href={`/app/t/${t.id}`}
-                  className="block rounded-xl border border-slate-200 bg-white p-4 transition hover:border-indigo-300 hover:shadow-sm"
-                >
-                  <div className="flex items-baseline justify-between gap-4">
-                    <p className="font-semibold text-slate-800">{t.audio_name}</p>
-                    <span className="shrink-0 text-xs text-slate-400">{formatDate(t.created_at)}</span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-600">
-                    {t.text || "(sin texto)"}
-                  </p>
-                </Link>
-              </li>
+              <TranscriptionRow key={t.id} transcription={t} projects={projects} />
             ))}
           </ul>
         )}

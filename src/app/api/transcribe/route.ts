@@ -48,6 +48,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "El audio supera los 25 MB." }, { status: 413 });
   }
 
+  const audioName = file.name || "audio";
+
+  // 1.5) Dedupe: si ya existe una transcripción con el mismo nombre y tamaño para este
+  //      usuario, no volvemos a llamar a Groq ni a duplicar. Devolvemos la existente.
+  //      Esto también neutraliza el doble-submit (dos requests casi simultáneas).
+  const { data: existing } = await supabase
+    .from("transcriptions")
+    .select("id, text")
+    .eq("user_id", user.id)
+    .eq("audio_name", audioName)
+    .eq("audio_size", file.size)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    return NextResponse.json({ text: existing.text ?? "", duplicate: true, id: existing.id });
+  }
+
   // 2) Transcribir con Groq.
   const groqForm = new FormData();
   groqForm.append("file", file, file.name || "audio");
@@ -95,7 +114,7 @@ export async function POST(req: NextRequest) {
   //    si falla la subida, igual guardamos el texto (sin audio).
   let audioPath: string | null = null;
   try {
-    const ext = audioExtension(file.name || "");
+    const ext = audioExtension(audioName);
     const path = buildAudioObjectPath(user.id, randomUUID(), ext);
     const { error: upErr } = await supabase.storage
       .from(AUDIO_BUCKET)
@@ -108,20 +127,28 @@ export async function POST(req: NextRequest) {
     /* seguir sin audio */
   }
 
-  // 4) Guardar la transcripción (best-effort; si falla, igual devolvemos el texto).
+  // 4) Guardar la transcripción. Acepta un proyecto destino opcional.
+  const projectId = (form.get("projectId") as string) || null;
+  let savedId: string | null = null;
   try {
-    await supabase.from("transcriptions").insert({
-      user_id: user.id,
-      audio_name: file.name || "audio",
-      audio_size: file.size,
-      audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
-      text,
-      language,
-      model,
-    });
+    const { data: inserted } = await supabase
+      .from("transcriptions")
+      .insert({
+        user_id: user.id,
+        project_id: projectId,
+        audio_name: audioName,
+        audio_size: file.size,
+        audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
+        text,
+        language,
+        model,
+      })
+      .select("id")
+      .single();
+    savedId = inserted?.id ?? null;
   } catch {
     /* no bloquear la respuesta por un error de guardado */
   }
 
-  return NextResponse.json({ text });
+  return NextResponse.json({ text, id: savedId });
 }

@@ -70,6 +70,19 @@ export function TranscriptionDetail({
     URL.revokeObjectURL(url);
   }
 
+  async function downloadAudio() {
+    if (!audioSrc) return;
+    // La URL firmada es cross-origin: bajamos el blob para forzar la descarga.
+    const resp = await fetch(audioSrc);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = transcription.audio_name || "audio";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function remove() {
     if (!confirm("¿Borrar esta transcripción? No se puede deshacer.")) return;
     await deleteTranscription(transcription.id);
@@ -146,6 +159,14 @@ export function TranscriptionDetail({
         >
           Descargar .txt
         </button>
+        {audioSrc && (
+          <button
+            onClick={downloadAudio}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Descargar audio
+          </button>
+        )}
         <button
           onClick={remove}
           className="ml-auto rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
