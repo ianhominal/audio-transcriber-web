@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Audio Transcriber
 
-## Getting Started
+Web app to turn audio into text in seconds using **Groq (Whisper)**. Upload a voice note or any
+audio file and get the transcription instantly — Spanish and dozens of languages.
 
-First, run the development server:
+Built with **Next.js** + **Supabase**, ready to deploy on **Vercel**.
+
+## Features
+
+- 🎙️ Transcribe audio (mp3, wav, ogg/opus, m4a, mp4, …) with Groq Whisper (`large-v3` / `turbo`).
+- 🔒 The Groq API key lives **only on the server** (environment variable) — never in the browser.
+- 👤 User accounts (email/password + Google) with Supabase Auth.
+- 💾 Transcriptions are saved per user, with Row Level Security (each user sees only their own).
+- 📋 Copy / download the result as `.txt`.
+
+## Tech stack
+
+- [Next.js](https://nextjs.org/) (App Router, TypeScript, Tailwind CSS)
+- [Supabase](https://supabase.com/) (Auth + Postgres)
+- [Groq](https://groq.com/) (Whisper transcription API)
+
+## Getting started
+
+### 1. Install
+
+```bash
+npm install
+```
+
+### 2. Set up Supabase
+
+1. Create a project at [supabase.com](https://supabase.com/).
+2. In **SQL Editor**, run the schema in [`supabase/schema.sql`](supabase/schema.sql).
+3. In **Project Settings → API**, copy the Project URL and the `anon` key.
+
+### 3. Environment variables
+
+Copy `.env.example` to `.env.local` and fill it in:
+
+```bash
+GROQ_API_KEY=gsk_your_key            # https://console.groq.com/keys
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+```
+
+### 4. Run
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy to Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Push this repo to GitHub.
+2. Import it on [Vercel](https://vercel.com/).
+3. Add the environment variables (`GROQ_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`) in **Settings → Environment Variables**.
+4. Deploy.
 
-## Learn More
+## How it works
 
-To learn more about Next.js, take a look at the following resources:
+```
+Browser  →  /api/transcribe  (server, holds the key)  →  Groq  →  text
+                     │
+                     └─ saves the transcription in Supabase (per user)
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/
+  app/
+    page.tsx                 landing
+    login/                   sign in / sign up
+    app/                     dashboard + transcribe (auth-protected)
+    api/transcribe/          server route (Groq + save)
+    auth/callback/           OAuth callback
+  lib/supabase/              Supabase clients + session middleware
+supabase/schema.sql          database schema (tables + RLS)
+```
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT — see [LICENSE](LICENSE).
