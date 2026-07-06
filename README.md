@@ -1,86 +1,82 @@
-# Audio Transcriber
+<div align="center">
 
-Web app to turn audio into text in seconds using **Groq (Whisper)**. Upload a voice note or any
-audio file and get the transcription instantly — Spanish and dozens of languages.
+# 🎙️ Audio Transcriber
 
-Built with **Next.js** + **Supabase**, ready to deploy on **Vercel**.
+### Turn any audio into text in seconds — powered by AI.
 
-## Features
+Drop a voice note or any audio file and get an accurate transcription instantly.
+Spanish and dozens of languages, with a clean and fast experience.
 
-- 🎙️ Transcribe audio (mp3, wav, ogg/opus, m4a, mp4, …) with Groq Whisper (`large-v3` / `turbo`).
-- 🔒 The Groq API key lives **only on the server** (environment variable) — never in the browser.
-- 👤 User accounts (email/password + Google) with Supabase Auth.
-- 💾 Transcriptions are saved per user, with Row Level Security (each user sees only their own).
-- 📋 Copy / download the result as `.txt`.
+![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 
-## Tech stack
+**Live demo — _coming soon_ (deploying to Vercel)**
 
-- [Next.js](https://nextjs.org/) (App Router, TypeScript, Tailwind CSS)
-- [Supabase](https://supabase.com/) (Auth + Postgres)
-- [Groq](https://groq.com/) (Whisper transcription API)
+</div>
 
-## Getting started
+---
 
-### 1. Install
+## ✨ Why you'll like it
+
+- ⚡ **Instant** — transcriptions in seconds, not minutes, thanks to Groq's Whisper inference.
+- 🌎 **Any language** — Spanish, English and dozens more, with automatic detection.
+- 🎧 **Any format** — mp3, wav, ogg/opus (WhatsApp voice notes!), m4a, mp4 and more.
+- 👤 **Your library** — sign in and every transcription is saved, ready when you need it.
+- ✍️ **Editable** — tweak the text, then copy it or download it as `.txt`.
+
+## 🛠️ Built with
+
+| Layer | Tech |
+|-------|------|
+| Framework | **Next.js** (App Router) + **TypeScript** |
+| Styling | **Tailwind CSS** |
+| Auth & Data | **Supabase** (Auth + Postgres) |
+| Transcription | **Groq** — Whisper `large-v3` / `turbo` |
+| Hosting | **Vercel** |
+
+## 🧠 Engineering highlights
+
+Small app, real-world architecture:
+
+- **Server-side API proxy** — third-party calls run on the backend, keeping the client clean.
+- **Row-Level Security** — every user can only ever read their own data, enforced at the database.
+- **Type-safe end to end** — TypeScript across UI, server routes and data access.
+- **Auth done right** — email/password and Google OAuth via Supabase, with protected routes middleware.
+
+## 🚀 Run it locally
 
 ```bash
+git clone https://github.com/ianhominal/audio-transcriber-web.git
+cd audio-transcriber-web
 npm install
 ```
 
-### 2. Set up Supabase
-
-1. Create a project at [supabase.com](https://supabase.com/).
-2. In **SQL Editor**, run the schema in [`supabase/schema.sql`](supabase/schema.sql).
-3. In **Project Settings → API**, copy the Project URL and the `anon` key.
-
-### 3. Environment variables
-
-Copy `.env.example` to `.env.local` and fill it in:
-
-```bash
-GROQ_API_KEY=gsk_your_key            # https://console.groq.com/keys
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-```
-
-### 4. Run
+1. Create a free project at [supabase.com](https://supabase.com/) and run [`supabase/schema.sql`](supabase/schema.sql) in the SQL editor.
+2. Copy `.env.example` → `.env.local` and fill in your Supabase keys and a [Groq API key](https://console.groq.com/keys).
+3. Start it:
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) and transcribe your first audio.
 
-## Deploy to Vercel
-
-1. Push this repo to GitHub.
-2. Import it on [Vercel](https://vercel.com/).
-3. Add the environment variables (`GROQ_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`) in **Settings → Environment Variables**.
-4. Deploy.
-
-## How it works
-
-```
-Browser  →  /api/transcribe  (server, holds the key)  →  Groq  →  text
-                     │
-                     └─ saves the transcription in Supabase (per user)
-```
-
-## Project structure
+## 📁 Structure
 
 ```
 src/
-  app/
-    page.tsx                 landing
-    login/                   sign in / sign up
-    app/                     dashboard + transcribe (auth-protected)
-    api/transcribe/          server route (Groq + save)
-    auth/callback/           OAuth callback
-  lib/supabase/              Supabase clients + session middleware
-supabase/schema.sql          database schema (tables + RLS)
+  app/          landing · login · dashboard · transcribe · API route
+  lib/supabase/ Supabase clients + session middleware
+supabase/       database schema (tables + RLS)
 ```
 
-## License
+## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+MIT © [Ian Hominal](https://github.com/ianhominal)
+
+<div align="center">
+<sub>Built with care — feedback and stars are always welcome ⭐</sub>
+</div>
