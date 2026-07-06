@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createProject } from "../actions";
@@ -27,8 +27,19 @@ export function TranscribeWorkspace({
   const [destino, setDestino] = useState<string>(initialProject); // "" | projectId | "__new__"
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("📁");
-  const language = "es"; // audios en español; el selector se quitó por ser fricción innecesaria
+  const [language, setLanguage] = useState("es"); // default español; recordamos la última elección
   const [model, setModel] = useState("whisper-large-v3-turbo");
+
+  // Recuperar la última preferencia de idioma (persistida en el navegador).
+  useEffect(() => {
+    const saved = localStorage.getItem("transcribe:language");
+    if (saved) setLanguage(saved);
+  }, []);
+
+  const changeLanguage = (value: string) => {
+    setLanguage(value);
+    localStorage.setItem("transcribe:language", value);
+  };
   const [items, setItems] = useState<Item[]>([]);
   const [running, setRunning] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -161,6 +172,14 @@ export function TranscribeWorkspace({
 
         {/* Opciones compactas */}
         <div className="mt-4 flex flex-wrap gap-4">
+          <label className="flex flex-col text-sm">
+            <span className="mb-1 font-semibold text-slate-500">Idioma</span>
+            <select value={language} onChange={(e) => changeLanguage(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2">
+              <option value="es">Español</option>
+              <option value="en">Inglés</option>
+              <option value="auto">Automático</option>
+            </select>
+          </label>
           <label className="flex flex-col text-sm">
             <span className="mb-1 font-semibold text-slate-500">Calidad</span>
             <select value={model} onChange={(e) => setModel(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2">
