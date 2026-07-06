@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function Landing() {
@@ -7,8 +8,11 @@ export default async function Landing() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const href = user ? "/app" : "/login";
-  const cta = user ? "Ir a la app" : "Probar gratis";
+  // Si ya está logueado, la landing (marketing) no aporta: directo a la app.
+  if (user) redirect("/app");
+
+  const href = "/login";
+  const cta = "Probar gratis";
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
