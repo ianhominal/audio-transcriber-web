@@ -65,7 +65,21 @@ export async function GET(req: NextRequest) {
     .select("user_id, refresh_token_encrypted, start_page_token, root_folder_id");
 
   if (connError) {
-    return NextResponse.json({ error: "No se pudieron leer las conexiones de Drive." }, { status: 500 });
+    // Superficie el error REAL de Supabase (no un mensaje genérico): esto es lo que permite
+    // diagnosticar en el momento si la causa es una service-role key mal configurada (ej. una
+    // "secret key" `sb_secret_...` que el gateway rechaza por venir también en el header
+    // `Authorization: Bearer` como si fuera un JWT), RLS bloqueando la lectura, o un problema
+    // de schema/columnas. Mismo criterio que ya usa `api/sync/push` con `error.message`.
+    console.error("[cron/drive-sync] error leyendo drive_connections:", connError);
+    return NextResponse.json(
+      {
+        error: "No se pudieron leer las conexiones de Drive.",
+        details: connError.message,
+        code: connError.code,
+        hint: connError.hint,
+      },
+      { status: 500 }
+    );
   }
 
   const results: UserSyncResult[] = [];
