@@ -25,6 +25,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Link href="/descargar" className="text-sm font-medium text-slate-500 hover:text-indigo-600">
               Descargar app ↓
             </Link>
+            <Link href="/app/ajustes" className="text-sm font-medium text-slate-500 hover:text-indigo-600">
+              Ajustes
+            </Link>
             <span className="hidden text-sm text-slate-500 sm:inline">{user.email}</span>
             <LogoutButton />
           </div>
