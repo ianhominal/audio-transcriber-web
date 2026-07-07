@@ -36,6 +36,12 @@ export function formatDate(iso: string): string {
   });
 }
 
+/** Genera un nombre de archivo para audio grabado/capturado (ej. "Grabacion-1720368000000.webm"). */
+export function formatRecordingFileName(prefix: string, timestampMs: number, extension: string): string {
+  const safeExt = extension.replace(/^\./, "");
+  return `${prefix}-${timestampMs}.${safeExt}`;
+}
+
 export type ProjectNameResult = { ok: true; value: string } | { ok: false; error: string };
 
 /** Valida y normaliza el nombre de un proyecto. */
@@ -44,4 +50,36 @@ export function validateProjectName(name: string): ProjectNameResult {
   if (!trimmed) return { ok: false, error: "El nombre no puede estar vacío." };
   if (trimmed.length > 60) return { ok: false, error: "El nombre no puede superar los 60 caracteres." };
   return { ok: true, value: trimmed };
+}
+
+/** Escapa un valor para usarlo como string YAML entre comillas dobles. */
+function yamlString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+export type MarkdownExportInput = {
+  title: string;
+  createdAt: string; // ISO
+  projectName?: string | null;
+  text: string;
+};
+
+/** Arma un .md con frontmatter YAML (title, date, project opcional) + el texto, listo para Obsidian. */
+export function buildMarkdownExport({ title, createdAt, projectName, text }: MarkdownExportInput): string {
+  const lines = ["---", `title: ${yamlString(title.trim() || "Sin título")}`, `date: ${yamlString(createdAt)}`];
+  if (projectName) lines.push(`project: ${yamlString(projectName)}`);
+  lines.push("---", "", text ?? "");
+  return lines.join("\n");
+}
+
+/** Sanitiza un nombre para usarlo como nombre de archivo (sin caracteres inválidos en Windows/macOS). */
+export function slugifyFileName(name: string, fallback = "transcripcion"): string {
+  const cleaned = (name ?? "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Si después de sanitizar no queda contenido real (solo guiones/espacios), usamos el fallback.
+  const hasContent = /[^\s-]/.test(cleaned);
+  return hasContent ? cleaned : fallback;
 }

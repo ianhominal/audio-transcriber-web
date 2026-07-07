@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatDate, formatFileSize } from "@/lib/format";
+import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
 import {
   updateTranscription,
   assignTranscriptionToProject,
@@ -46,6 +46,18 @@ export function TranscriptionDetail({
   const [justSaved, setJustSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const projectName = projects.find((p) => p.id === projectId)?.name ?? null;
 
   // Hay cambio real si cambió el título, el texto, la descripción o el ícono.
   const dirty =
@@ -106,6 +118,36 @@ export function TranscriptionDetail({
     a.download = transcription.audio_name || "audio";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportMarkdown() {
+    const md = buildMarkdownExport({
+      title: title || transcription.audio_name,
+      createdAt: transcription.created_at,
+      projectName,
+      text,
+    });
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slugifyFileName(title || transcription.audio_name)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setExportOpen(false);
+  }
+
+  function exportDrive() {
+    // TODO(export-drive): requiere agregar el scope "https://www.googleapis.com/auth/drive.file" al
+    // signInWithOAuth de Google en src/app/login/page.tsx y volver a autenticar a los usuarios
+    // existentes (el provider_token de la sesión actual no incluye ese scope todavía). Además, al ser
+    // un scope sensible, probablemente dispare el proceso de verificación de OAuth consent screen en
+    // Google Cloud Console. Investigado el 2026-07-07 (ver changelog de esa fecha). Con el scope y el
+    // provider_token disponibles, el upload sería un POST multipart a
+    // https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart con el Markdown generado
+    // por buildMarkdownExport como contenido.
+    setMsg("Exportar a Google Drive todavía no está disponible (requiere un cambio de permisos de Google).");
+    setExportOpen(false);
   }
 
   async function remove() {
@@ -224,6 +266,30 @@ export function TranscriptionDetail({
             Descargar audio
           </button>
         )}
+        <div ref={exportRef} className="relative">
+          <button
+            onClick={() => setExportOpen((o) => !o)}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Exportar ▾
+          </button>
+          {exportOpen && (
+            <div className="absolute left-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+              <button
+                onClick={exportMarkdown}
+                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                📝 Obsidian / Markdown (.md)
+              </button>
+              <button
+                onClick={exportDrive}
+                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-100"
+              >
+                📤 Google Drive <span className="text-xs">(próximamente)</span>
+              </button>
+            </div>
+          )}
+        </div>
         <button
           onClick={remove}
           className="ml-auto rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"

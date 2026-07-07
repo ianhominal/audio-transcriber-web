@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createProject } from "../actions";
 import { EmojiPicker } from "../emoji-picker";
-import { formatFileSize } from "@/lib/format";
+import { formatFileSize, formatDuration, formatRecordingFileName } from "@/lib/format";
 
 // Formatos que Groq/Whisper acepta nativamente (mp4/mpeg incluidos: extrae el audio del video).
 const SUPPORTED = [
@@ -15,6 +15,25 @@ const SUPPORTED = [
 
 // Límite de payload de Vercel (~4.5 MB). Los audios más grandes se derivan a la app de escritorio.
 const WEB_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
+
+// Candidatos de mimeType para MediaRecorder, en orden de preferencia (el navegador soporta un subconjunto).
+const AUDIO_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/ogg;codecs=opus",
+  "audio/ogg",
+];
+
+/** Elige el primer mimeType soportado por MediaRecorder en este navegador. */
+function pickSupportedMimeType(candidates: string[]): string | undefined {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return undefined;
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type));
+}
+
+/** Extensión de archivo acorde al mimeType grabado (webm u ogg). */
+function extensionForMimeType(mimeType: string): string {
+  return mimeType.includes("ogg") ? "ogg" : "webm";
+}
 
 type Project = { id: string; name: string; icon: string };
 type Status = "pending" | "working" | "done" | "duplicate" | "error";
@@ -54,6 +73,24 @@ export function TranscribeWorkspace({
   const runningRef = useRef(false); // guard SÍNCRONO contra doble-submit
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // --- Grabar desde el micrófono ---
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordError, setRecordError] = useState("");
+  const micRecorderRef = useRef<MediaRecorder | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micChunksRef = useRef<Blob[]>([]);
+  const micTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // --- Capturar audio de una reunión (pestaña/pantalla) ---
+  const [capturing, setCapturing] = useState(false);
+  const [captureSeconds, setCaptureSeconds] = useState(0);
+  const [captureError, setCaptureError] = useState("");
+  const captureRecorderRef = useRef<MediaRecorder | null>(null);
+  const captureStreamRef = useRef<MediaStream | null>(null);
+  const captureChunksRef = useRef<Blob[]>([]);
+  const captureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const addFiles = useCallback((files: FileList | null) => {
     if (!files?.length) return;
     const nuevos: Item[] = Array.from(files).map((file) => ({
@@ -62,6 +99,129 @@ export function TranscribeWorkspace({
       status: "pending" as Status,
     }));
     setItems((prev) => [...prev, ...nuevos]);
+  }, []);
+
+  const stopMicRecording = useCallback(() => {
+    if (micTimerRef.current) {
+      clearInterval(micTimerRef.current);
+      micTimerRef.current = null;
+    }
+    micRecorderRef.current?.stop(); // dispara onstop, que agrega el File a la cola
+    micRecorderRef.current = null;
+    setRecording(false);
+  }, []);
+
+  const startMicRecording = useCallback(async () => {
+    setRecordError("");
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setRecordError("Este navegador no soporta grabar audio desde el micrófono.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickSupportedMimeType(AUDIO_MIME_CANDIDATES);
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      micChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) micChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const usedType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(micChunksRef.current, { type: usedType });
+        const ext = extensionForMimeType(usedType);
+        const file = new File([blob], formatRecordingFileName("Grabacion", Date.now(), ext), {
+          type: usedType,
+        });
+        setItems((prev) => [...prev, { key: nextKey(), file, status: "pending" as Status }]);
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      recorder.start();
+      micRecorderRef.current = recorder;
+      micStreamRef.current = stream;
+      setRecordingSeconds(0);
+      setRecording(true);
+      micTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : "";
+      setRecordError(
+        name === "NotAllowedError" || name === "PermissionDeniedError"
+          ? "Permiso de micrófono denegado. Habilitalo en la configuración del navegador para grabar."
+          : "No se pudo acceder al micrófono."
+      );
+    }
+  }, []);
+
+  const stopMeetingCapture = useCallback(() => {
+    if (captureTimerRef.current) {
+      clearInterval(captureTimerRef.current);
+      captureTimerRef.current = null;
+    }
+    captureRecorderRef.current?.stop(); // dispara onstop, que agrega el File a la cola
+    captureRecorderRef.current = null;
+    setCapturing(false);
+  }, []);
+
+  const startMeetingCapture = useCallback(async () => {
+    setCaptureError("");
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
+      setCaptureError("Este navegador no soporta capturar audio de una pestaña o pantalla.");
+      return;
+    }
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const audioTracks = displayStream.getAudioTracks();
+      if (!audioTracks.length) {
+        displayStream.getTracks().forEach((t) => t.stop());
+        setCaptureError(
+          'No se detectó audio en lo compartido. Al elegir la pestaña, tildá "Compartir audio de la pestaña".'
+        );
+        return;
+      }
+      const audioStream = new MediaStream(audioTracks);
+      const mimeType = pickSupportedMimeType(AUDIO_MIME_CANDIDATES);
+      const recorder = new MediaRecorder(audioStream, mimeType ? { mimeType } : undefined);
+      captureChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) captureChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const usedType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(captureChunksRef.current, { type: usedType });
+        const ext = extensionForMimeType(usedType);
+        const file = new File([blob], formatRecordingFileName("Reunion", Date.now(), ext), {
+          type: usedType,
+        });
+        setItems((prev) => [...prev, { key: nextKey(), file, status: "pending" as Status }]);
+        displayStream.getTracks().forEach((t) => t.stop());
+      };
+      // Si el usuario corta el compartir desde el propio navegador, cerramos la grabación prolijamente.
+      displayStream.getVideoTracks()[0]?.addEventListener("ended", stopMeetingCapture);
+      recorder.start();
+      captureRecorderRef.current = recorder;
+      captureStreamRef.current = displayStream;
+      setCaptureSeconds(0);
+      setCapturing(true);
+      captureTimerRef.current = setInterval(() => setCaptureSeconds((s) => s + 1), 1000);
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : "";
+      setCaptureError(
+        name === "NotAllowedError" || name === "PermissionDeniedError"
+          ? "Permiso de captura denegado."
+          : "No se pudo iniciar la captura de pantalla/pestaña."
+      );
+    }
+  }, [stopMeetingCapture]);
+
+  // Limpieza al desmontar: no dejar streams ni timers vivos.
+  useEffect(() => {
+    return () => {
+      if (micTimerRef.current) clearInterval(micTimerRef.current);
+      if (captureTimerRef.current) clearInterval(captureTimerRef.current);
+      micRecorderRef.current?.stop();
+      captureRecorderRef.current?.stop();
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      captureStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
 
   const onDrop = useCallback(
@@ -233,6 +393,53 @@ export function TranscribeWorkspace({
         <p className="font-medium text-slate-700">Arrastrá tus audios acá</p>
         <p className="mt-1 text-sm text-slate-500">o hacé clic para elegirlos · podés cargar varios · mp3, wav, ogg, m4a…</p>
       </div>
+
+      {/* Grabar / capturar en vivo */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {!recording ? (
+          <button
+            onClick={startMicRecording}
+            disabled={capturing}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            🎙️ Grabar
+          </button>
+        ) : (
+          <button
+            onClick={stopMicRecording}
+            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+            Detener · {formatDuration(recordingSeconds)}
+          </button>
+        )}
+
+        {!capturing ? (
+          <button
+            onClick={startMeetingCapture}
+            disabled={recording}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            🖥️ Capturar reunión
+          </button>
+        ) : (
+          <button
+            onClick={stopMeetingCapture}
+            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+            Detener · {formatDuration(captureSeconds)}
+          </button>
+        )}
+      </div>
+      {capturing && (
+        <p className="mt-1 text-xs text-slate-400">
+          Recordá tildar &quot;Compartir audio de la pestaña&quot; en el diálogo del navegador (ej. con Google Meet
+          abierto en otra pestaña).
+        </p>
+      )}
+      {recordError && <p className="mt-2 text-sm text-red-600">{recordError}</p>}
+      {captureError && <p className="mt-2 text-sm text-red-600">{captureError}</p>}
 
       {/* Cola de audios */}
       {items.length > 0 && (

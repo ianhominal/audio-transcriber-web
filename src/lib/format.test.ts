@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { formatFileSize, formatDuration, formatDate, validateProjectName } from "./format";
+import {
+  formatFileSize,
+  formatDuration,
+  formatDate,
+  validateProjectName,
+  formatRecordingFileName,
+  buildMarkdownExport,
+  slugifyFileName,
+} from "./format";
 
 describe("formatFileSize", () => {
   it("muestra bytes cuando es menor a 1 KB", () => {
@@ -43,6 +51,73 @@ describe("formatDate", () => {
   it("devuelve cadena vacía si el ISO es inválido", () => {
     expect(formatDate("no-es-fecha")).toBe("");
     expect(formatDate("")).toBe("");
+  });
+});
+
+describe("formatRecordingFileName", () => {
+  it("arma <prefijo>-<timestamp>.<extensión>", () => {
+    expect(formatRecordingFileName("Grabacion", 1720368000000, "webm")).toBe(
+      "Grabacion-1720368000000.webm"
+    );
+  });
+
+  it("acepta la extensión con o sin punto inicial", () => {
+    expect(formatRecordingFileName("Reunion", 123, ".webm")).toBe("Reunion-123.webm");
+    expect(formatRecordingFileName("Reunion", 123, "webm")).toBe("Reunion-123.webm");
+  });
+});
+
+describe("buildMarkdownExport", () => {
+  it("arma el frontmatter con title y date, sin project si no hay", () => {
+    const md = buildMarkdownExport({
+      title: "Reunión de equipo",
+      createdAt: "2026-07-06T15:40:44Z",
+      projectName: null,
+      text: "Hola mundo.",
+    });
+    expect(md).toBe(
+      ['---', 'title: "Reunión de equipo"', 'date: "2026-07-06T15:40:44Z"', "---", "", "Hola mundo."].join("\n")
+    );
+  });
+
+  it("incluye project cuando está presente", () => {
+    const md = buildMarkdownExport({
+      title: "Nota",
+      createdAt: "2026-07-06T15:40:44Z",
+      projectName: "Trabajo",
+      text: "Texto.",
+    });
+    expect(md).toContain('project: "Trabajo"');
+  });
+
+  it("escapa comillas dobles en el título", () => {
+    const md = buildMarkdownExport({
+      title: 'Reunión "importante"',
+      createdAt: "2026-07-06T15:40:44Z",
+      text: "x",
+    });
+    expect(md).toContain('title: "Reunión \\"importante\\""');
+  });
+
+  it("usa 'Sin título' si el título viene vacío", () => {
+    const md = buildMarkdownExport({ title: "   ", createdAt: "2026-07-06T15:40:44Z", text: "x" });
+    expect(md).toContain('title: "Sin título"');
+  });
+});
+
+describe("slugifyFileName", () => {
+  it("reemplaza caracteres inválidos de nombre de archivo", () => {
+    expect(slugifyFileName('Reunión: "importante" / 2026')).toBe("Reunión- -importante- - 2026");
+  });
+
+  it("recorta espacios repetidos y en los extremos", () => {
+    expect(slugifyFileName("  Notas   varias  ")).toBe("Notas varias");
+  });
+
+  it("usa el fallback si queda vacío", () => {
+    expect(slugifyFileName("")).toBe("transcripcion");
+    expect(slugifyFileName("   ")).toBe("transcripcion");
+    expect(slugifyFileName("///", "audio")).toBe("audio");
   });
 });
 
