@@ -39,12 +39,12 @@ export default async function DescargarPage() {
 
         <div className="mt-10">
           <a
-            href="https://github.com/ianhominal/audio-transcriber-web/releases/download/desktop-v1.0/AudioTranscriber.exe"
+            href="https://github.com/ianhominal/audio-transcriber-web/releases/download/desktop-v1.0.0/AudioTranscriber-win-Setup.exe"
             className="inline-block rounded-lg bg-indigo-600 px-8 py-4 text-lg font-semibold text-white transition hover:bg-indigo-700"
           >
             ⬇ Descargar para Windows
           </a>
-          <p className="mt-3 text-sm text-slate-400">Windows 10/11 · 64 bits · ~155 MB</p>
+          <p className="mt-3 text-sm text-slate-400">Windows 10/11 · 64 bits · se actualiza sola</p>
         </div>
       </section>
 
