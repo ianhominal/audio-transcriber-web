@@ -20,86 +20,112 @@ export const runtime = "nodejs";
  * }
  */
 export async function POST(req: NextRequest) {
-  const { supabase, user } = await getApiUser(req);
-  if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
-
-  let body: PushBody;
   try {
-    body = (await req.json()) as PushBody;
-  } catch {
-    return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
-  }
+    const { supabase, user } = await getApiUser(req);
+    if (!user) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-  const now = new Date().toISOString();
-  const errors: string[] = [];
-
-  // ---- Proyectos: upserts ----
-  for (const p of body.projects?.upserts ?? []) {
-    const parsed = validateProjectName(p.name ?? "");
-    if (!p.id || !parsed.ok) {
-      errors.push(`Proyecto inválido: ${p.id ?? "(sin id)"}`);
-      continue;
+    let body: PushBody;
+    try {
+      body = (await req.json()) as PushBody;
+    } catch {
+      return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
     }
-    const { error } = await supabase.from("projects").upsert({
-      id: p.id,
-      user_id: user.id,
-      name: parsed.value,
-      title: parsed.value,
-      icon: (p.icon ?? "").slice(0, 8),
-      description: p.description ?? "",
-      deleted_at: null,
+
+    const now = new Date().toISOString();
+    const errors: string[] = [];
+
+    // ---- Proyectos: upserts ----
+    for (const p of body.projects?.upserts ?? []) {
+      try {
+        const parsed = validateProjectName(p.name ?? "");
+        if (!p.id || !parsed.ok) {
+          errors.push(`Proyecto inválido: ${p.id ?? "(sin id)"}`);
+          continue;
+        }
+        const { error } = await supabase.from("projects").upsert({
+          id: p.id,
+          user_id: user.id,
+          name: parsed.value,
+          title: parsed.value,
+          icon: (p.icon ?? "").slice(0, 8),
+          description: p.description ?? "",
+          deleted_at: null,
+        });
+        if (error) errors.push(`Proyecto ${p.id}: ${error.message}`);
+      } catch (err) {
+        // Un item inválido (ej. id que no es UUID válido) no debe tumbar el resto del push.
+        errors.push(`Proyecto ${p.id ?? "(sin id)"}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ---- Proyectos: deletes (soft) ----
+    for (const id of body.projects?.deletes ?? []) {
+      try {
+        await supabase.from("transcriptions").update({ project_id: null }).eq("project_id", id).eq("user_id", user.id);
+        const { error } = await supabase
+          .from("projects")
+          .update({ deleted_at: now })
+          .eq("id", id)
+          .eq("user_id", user.id);
+        if (error) errors.push(`Borrar proyecto ${id}: ${error.message}`);
+      } catch (err) {
+        errors.push(`Borrar proyecto ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ---- Transcripciones: upserts (solo metadata/texto, no creación) ----
+    for (const t of body.transcriptions?.upserts ?? []) {
+      try {
+        if (!t.id) {
+          errors.push("Transcripción sin id");
+          continue;
+        }
+        const update: Record<string, unknown> = {};
+        if (t.title !== undefined) update.title = (t.title ?? "").slice(0, 120);
+        if (t.text !== undefined) update.text = t.text;
+        if (t.description !== undefined) update.description = (t.description ?? "").slice(0, 2000);
+        if (t.icon !== undefined) update.icon = (t.icon ?? "").slice(0, 8);
+        if (t.project_id !== undefined) update.project_id = t.project_id;
+        if (Object.keys(update).length === 0) continue;
+
+        const { error } = await supabase
+          .from("transcriptions")
+          .update(update)
+          .eq("id", t.id)
+          .eq("user_id", user.id);
+        if (error) errors.push(`Transcripción ${t.id}: ${error.message}`);
+      } catch (err) {
+        errors.push(`Transcripción ${t.id ?? "(sin id)"}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ---- Transcripciones: deletes (soft) ----
+    for (const id of body.transcriptions?.deletes ?? []) {
+      try {
+        const { error } = await supabase
+          .from("transcriptions")
+          .update({ deleted_at: now })
+          .eq("id", id)
+          .eq("user_id", user.id);
+        if (error) errors.push(`Borrar transcripción ${id}: ${error.message}`);
+      } catch (err) {
+        errors.push(`Borrar transcripción ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    return NextResponse.json({
+      serverTime: now,
+      ok: errors.length === 0,
+      errors,
     });
-    if (error) errors.push(`Proyecto ${p.id}: ${error.message}`);
+  } catch (err) {
+    // Red de seguridad: cualquier excepción no prevista (ej. throw fuera del manejo
+    // por-ítem) devuelve un 500 con mensaje real en vez de un cuerpo vacío opaco.
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
   }
-
-  // ---- Proyectos: deletes (soft) ----
-  for (const id of body.projects?.deletes ?? []) {
-    await supabase.from("transcriptions").update({ project_id: null }).eq("project_id", id).eq("user_id", user.id);
-    const { error } = await supabase
-      .from("projects")
-      .update({ deleted_at: now })
-      .eq("id", id)
-      .eq("user_id", user.id);
-    if (error) errors.push(`Borrar proyecto ${id}: ${error.message}`);
-  }
-
-  // ---- Transcripciones: upserts (solo metadata/texto, no creación) ----
-  for (const t of body.transcriptions?.upserts ?? []) {
-    if (!t.id) {
-      errors.push("Transcripción sin id");
-      continue;
-    }
-    const update: Record<string, unknown> = {};
-    if (t.title !== undefined) update.title = t.title.slice(0, 120);
-    if (t.text !== undefined) update.text = t.text;
-    if (t.description !== undefined) update.description = t.description.slice(0, 2000);
-    if (t.icon !== undefined) update.icon = t.icon.slice(0, 8);
-    if (t.project_id !== undefined) update.project_id = t.project_id;
-    if (Object.keys(update).length === 0) continue;
-
-    const { error } = await supabase
-      .from("transcriptions")
-      .update(update)
-      .eq("id", t.id)
-      .eq("user_id", user.id);
-    if (error) errors.push(`Transcripción ${t.id}: ${error.message}`);
-  }
-
-  // ---- Transcripciones: deletes (soft) ----
-  for (const id of body.transcriptions?.deletes ?? []) {
-    const { error } = await supabase
-      .from("transcriptions")
-      .update({ deleted_at: now })
-      .eq("id", id)
-      .eq("user_id", user.id);
-    if (error) errors.push(`Borrar transcripción ${id}: ${error.message}`);
-  }
-
-  return NextResponse.json({
-    serverTime: now,
-    ok: errors.length === 0,
-    errors,
-  });
 }
 
 type PushBody = {
