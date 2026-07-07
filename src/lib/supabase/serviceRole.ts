@@ -1,7 +1,10 @@
 import { createClient as createServiceClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Saneamos los valores de env: si al pegar la clave en el dashboard se coló un salto de línea
+// o un espacio (pasa seguido con claves largas), el header HTTP queda inválido
+// ("invalid header value"). La clave no tiene whitespace interno legítimo, así que lo quitamos todo.
+const URL = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+const SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").replace(/\s/g, "");
 
 /**
  * Cliente de Supabase con privilegios de service role: bypassea RLS por completo.
