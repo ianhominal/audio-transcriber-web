@@ -7,11 +7,12 @@
  * reciben el `accessToken` explícito — nada de estado global ni sesión de browser.
  */
 import { GOOGLE_TOKEN_URL } from "./oauth";
+import type { DriveTreeNode } from "./tree";
 
 const DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
 const DRIVE_CHANGES_URL = "https://www.googleapis.com/drive/v3/changes";
-const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+export const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 /** Campos que devuelve `files.create`/`files.update` para poder registrar el mapeo sin otro round-trip. */
 const FILE_FIELDS = "id,name,md5Checksum,modifiedTime";
@@ -215,6 +216,97 @@ export async function createFolder(
     body: JSON.stringify({ name, mimeType: FOLDER_MIME_TYPE, parents: parentId ? [parentId] : undefined }),
   });
   return res.json();
+}
+
+/** Escapa comillas simples y backslashes de un valor dentro de una query `q` de Drive (ej. un `fileId` en `'<id>' in parents`). */
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+export type DriveChildResult = {
+  id: string;
+  name: string;
+  mimeType: string;
+  trashed?: boolean;
+};
+
+/** `true` si el resultado de `listFolderChildren` es una subcarpeta (en vez de un archivo). */
+export function isDriveFolder(child: Pick<DriveChildResult, "mimeType">): boolean {
+  return child.mimeType === FOLDER_MIME_TYPE;
+}
+
+/**
+ * `files.list` de los hijos DIRECTOS de `folderId` (archivos Y subcarpetas), paginado. Base
+ * para la importación jerárquica de la fase siguiente (doc 10): el caller decide si desciende,
+ * llamando de nuevo con el `id` de cada subcarpeta devuelta (BFS/DFS) — esta función solo lista
+ * un nivel, no recorre el árbol por sí sola.
+ */
+export async function listFolderChildren(accessToken: string, folderId: string): Promise<DriveChildResult[]> {
+  const children: DriveChildResult[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      q: `'${escapeDriveQueryValue(folderId)}' in parents and trashed = false`,
+      fields: "nextPageToken,files(id,name,mimeType,trashed)",
+      pageSize: "1000",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await driveFetch(`${DRIVE_FILES_URL}?${params.toString()}`, accessToken);
+    const data = await res.json();
+    children.push(...((data.files ?? []) as DriveChildResult[]));
+    pageToken = (data.nextPageToken as string | undefined) ?? undefined;
+  } while (pageToken);
+
+  return children;
+}
+
+/**
+ * Trae RECURSIVAMENTE el árbol completo de `folderId` (carpetas + archivos), para la importación
+ * inicial de una carpeta conectada (doc 10, fase de importación con jerarquía). Es la única pieza
+ * con I/O real de este flujo — el resultado (`DriveTreeNode`) es lo que consume el planificador
+ * PURO `planDriveImport` (`src/lib/drive/tree.ts`), que decide qué crear sin volver a tocar la red.
+ *
+ * Recorre subcarpetas en paralelo (una tanda de `listFolderChildren` por nivel, luego los hijos-
+ * carpeta se resuelven con `Promise.all`) para no pagar el costo secuencial de un árbol ancho —
+ * `driveFetch` ya tiene reintento con backoff ante 429/403 de cuota, así que un pico de
+ * paralelismo es resiliente. Protección anti-recursión-infinita: `maxDepth` (default 20) + set de
+ * `driveId` visitados (una carpeta compartida con múltiples padres no se recorre dos veces).
+ */
+export async function fetchDriveFolderTree(
+  accessToken: string,
+  folderId: string,
+  name: string,
+  opts: { maxDepth?: number } = {}
+): Promise<DriveTreeNode> {
+  const maxDepth = opts.maxDepth ?? 20;
+  const visited = new Set<string>([folderId]);
+
+  async function build(id: string, nodeName: string, depth: number): Promise<DriveTreeNode> {
+    if (depth > maxDepth) {
+      return { driveId: id, name: nodeName, isFolder: true, children: [] };
+    }
+
+    const children = await listFolderChildren(accessToken, id);
+    const fileNodes: DriveTreeNode[] = [];
+    const folderBuilds: Promise<DriveTreeNode>[] = [];
+
+    for (const child of children) {
+      if (isDriveFolder(child)) {
+        if (visited.has(child.id)) continue; // anti-ciclo/duplicado (carpeta con múltiples padres)
+        visited.add(child.id);
+        folderBuilds.push(build(child.id, child.name, depth + 1));
+      } else {
+        fileNodes.push({ driveId: child.id, name: child.name, isFolder: false });
+      }
+    }
+
+    const folderNodes = await Promise.all(folderBuilds);
+    return { driveId: id, name: nodeName, isFolder: true, children: [...folderNodes, ...fileNodes] };
+  }
+
+  return build(folderId, name, 1);
 }
 
 /** `files.create` con contenido (multipart): sube un archivo nuevo dentro de `folderId`. */

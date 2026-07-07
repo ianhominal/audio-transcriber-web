@@ -1,0 +1,234 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { Spinner } from "@/components/ui/Spinner";
+import { useToast } from "@/components/ui/Toast";
+
+type DriveFolder = { id: string; name: string };
+type Crumb = { id: string; name: string };
+
+const ROOT_CRUMB: Crumb = { id: "root", name: "Mi unidad" };
+
+type ImportSummary = {
+  imported: { projects: number; transcriptions: number };
+  skipped: { existingFolders: number; existingFiles: number; otherFiles: number };
+  depthTruncated: boolean;
+};
+
+/**
+ * Modal "Conectar carpeta de Drive" (doc 10): árbol navegable server-side (sin Google Picker —
+ * el token del browser tiene scope `drive.file`, insuficiente para recorrer carpetas ajenas). Se
+ * apoya en `GET /api/drive/folders` para listar subcarpetas y en `POST
+ * /api/drive/folders/connect` para conectar + importar recursivamente la carpeta actual.
+ */
+export function DriveFolderConnect() {
+  const router = useRouter();
+  const { show: toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [crumbs, setCrumbs] = useState<Crumb[]>([ROOT_CRUMB]);
+  const [folders, setFolders] = useState<DriveFolder[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+
+  const current = crumbs[crumbs.length - 1];
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+
+    // Función nombrada (no un setState directo en el cuerpo del efecto): el fetch dispara sus
+    // propios cambios de estado dentro del handler async, evitando la cascada de renders que
+    // marca `react-hooks/set-state-in-effect` ante un `setState` síncrono a nivel del efecto.
+    async function loadFolders() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/drive/folders?parent=${encodeURIComponent(current.id)}`);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || "No se pudieron listar las carpetas.");
+        if (!cancelled) setFolders(body.folders as DriveFolder[]);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "No se pudieron listar las carpetas.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadFolders();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, current.id]);
+
+  function openModal() {
+    setCrumbs([ROOT_CRUMB]);
+    setFolders([]);
+    setError(null);
+    setSummary(null);
+    setOpen(true);
+  }
+
+  function closeModal() {
+    if (connecting) return; // no cerrar en medio de una importación
+    setOpen(false);
+  }
+
+  function enterFolder(folder: DriveFolder) {
+    setCrumbs((prev) => [...prev, { id: folder.id, name: folder.name }]);
+  }
+
+  function goToCrumb(index: number) {
+    setCrumbs((prev) => prev.slice(0, index + 1));
+  }
+
+  async function connectCurrent() {
+    setConnecting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/drive/folders/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driveFolderId: current.id, name: current.name }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "No se pudo conectar la carpeta.");
+      setSummary(body as ImportSummary);
+      toast("Carpeta de Drive conectada.", "success");
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo conectar la carpeta.";
+      setError(message);
+      toast(message, "error");
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button variant="secondary" onClick={openModal}>
+        📂 Conectar carpeta de Drive
+      </Button>
+    );
+  }
+
+  return (
+    <Modal onClose={closeModal} closeOnBackdrop={!connecting} labelledBy="drive-connect-title">
+      <div className="flex items-center justify-between">
+        <h3 id="drive-connect-title" className="font-semibold text-slate-900">
+          Conectar carpeta de Drive
+        </h3>
+        <button
+          onClick={closeModal}
+          disabled={connecting}
+          className="rounded-md px-2 py-1 text-slate-400 transition hover:bg-slate-100 disabled:opacity-40"
+          aria-label="Cerrar"
+        >
+          ✕
+        </button>
+      </div>
+
+      {summary ? (
+        <div className="mt-4 space-y-2 text-sm">
+          <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-medium text-emerald-700">
+            <span aria-hidden="true">✓</span> Carpeta conectada
+          </p>
+          <ul className="space-y-1 text-slate-600">
+            <li>
+              {summary.imported.projects} subcarpeta(s) y {summary.imported.transcriptions} nota(s) importadas.
+            </li>
+            {(summary.skipped.existingFolders > 0 || summary.skipped.existingFiles > 0) && (
+              <li className="text-slate-400">
+                {summary.skipped.existingFolders} carpeta(s) y {summary.skipped.existingFiles} nota(s) ya estaban
+                importadas — no se duplicaron.
+              </li>
+            )}
+            {summary.skipped.otherFiles > 0 && (
+              <li className="text-slate-400">
+                {summary.skipped.otherFiles} archivo(s) que no son carpeta ni .md se ignoraron.
+              </li>
+            )}
+            {summary.depthTruncated && (
+              <li className="text-amber-600">
+                La carpeta tenía más de 20 niveles de profundidad; lo que está más abajo no se importó.
+              </li>
+            )}
+          </ul>
+          <Button onClick={closeModal} className="mt-2 w-full">
+            Listo
+          </Button>
+        </div>
+      ) : (
+        <>
+          {/* Breadcrumb */}
+          <nav className="mt-3 flex flex-wrap items-center gap-1 text-xs text-slate-500" aria-label="Ubicación en Drive">
+            {crumbs.map((c, i) => (
+              <span key={c.id} className="flex items-center gap-1">
+                {i > 0 && (
+                  <span className="text-slate-300" aria-hidden="true">
+                    /
+                  </span>
+                )}
+                <button
+                  onClick={() => goToCrumb(i)}
+                  disabled={i === crumbs.length - 1 || connecting}
+                  className={i === crumbs.length - 1 ? "font-semibold text-slate-700" : "hover:underline"}
+                >
+                  {c.name}
+                </button>
+              </span>
+            ))}
+          </nav>
+
+          {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+          <div className="mt-2 max-h-64 min-h-[6rem] overflow-y-auto rounded-lg border border-slate-200">
+            {loading ? (
+              <p className="flex items-center justify-center gap-2 p-4 text-sm text-slate-400">
+                <Spinner size="xs" /> Cargando…
+              </p>
+            ) : folders.length === 0 ? (
+              <p className="p-4 text-center text-sm text-slate-400">Sin subcarpetas acá.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {folders.map((f) => (
+                  <li key={f.id}>
+                    <button
+                      onClick={() => enterFolder(f)}
+                      disabled={connecting}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <span aria-hidden="true">📁</span>
+                      <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                      <span className="text-slate-300" aria-hidden="true">
+                        ›
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <p className="mt-2 text-xs text-slate-400">
+            Se importa &quot;{current.name}&quot; con toda su jerarquía de subcarpetas y notas .md.
+          </p>
+
+          <div className="mt-3 flex gap-2">
+            <Button onClick={connectCurrent} loading={connecting} disabled={loading} className="flex-1">
+              {connecting ? "Importando… puede tardar" : `Conectar "${current.name}"`}
+            </Button>
+            <Button variant="secondary" onClick={closeModal} disabled={connecting}>
+              Cancelar
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}

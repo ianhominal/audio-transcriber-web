@@ -5,6 +5,8 @@ import {
   getStartPageToken,
   listChanges,
   createFolder,
+  listFolderChildren,
+  isDriveFolder,
   uploadFile,
   updateFile,
   getFileContent,
@@ -21,6 +23,11 @@ function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as Response;
+}
+
+/** `URLSearchParams` codifica el espacio como `+`, no `%20` — decodificar ambos para comparar el `q` legible. */
+function decodeUrlQuery(url: string): string {
+  return decodeURIComponent(url.replace(/\+/g, " "));
 }
 
 function textResponse(body: string, init: { ok?: boolean; status?: number } = {}): Response {
@@ -120,6 +127,52 @@ describe("cliente Drive API (fetch mockeado)", () => {
       const body = JSON.parse(init.body as string);
       expect(body.mimeType).toBe("application/vnd.google-apps.folder");
       expect(body.parents).toBeUndefined();
+    });
+  });
+
+  describe("listFolderChildren", () => {
+    it("arma el query q con el folderId y filtra trashed=false", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ files: [{ id: "f1", name: "audio1.ogg", mimeType: "audio/ogg" }] })
+      );
+      const children = await listFolderChildren("AT", "folder-1");
+      expect(children).toEqual([{ id: "f1", name: "audio1.ogg", mimeType: "audio/ogg" }]);
+
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(decodeUrlQuery(url)).toContain("q='folder-1' in parents and trashed = false");
+    });
+
+    it("incluye subcarpetas junto con archivos en el mismo listado", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          files: [
+            { id: "sub-1", name: "Semana 1", mimeType: "application/vnd.google-apps.folder" },
+            { id: "f1", name: "audio1.ogg", mimeType: "audio/ogg" },
+          ],
+        })
+      );
+      const children = await listFolderChildren("AT", "folder-1");
+      expect(children).toHaveLength(2);
+      expect(isDriveFolder(children[0])).toBe(true);
+      expect(isDriveFolder(children[1])).toBe(false);
+    });
+
+    it("pagina hasta agotar nextPageToken y junta todos los hijos", async () => {
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ files: [{ id: "f1", name: "a", mimeType: "audio/ogg" }], nextPageToken: "p2" }))
+        .mockResolvedValueOnce(jsonResponse({ files: [{ id: "f2", name: "b", mimeType: "audio/ogg" }] }));
+
+      const children = await listFolderChildren("AT", "folder-1");
+      expect(children.map((c) => c.id)).toEqual(["f1", "f2"]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][0]).toContain("pageToken=p2");
+    });
+
+    it("escapa comillas simples del folderId en el query q", async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ files: [] }));
+      await listFolderChildren("AT", "folder'raro");
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(decodeUrlQuery(url)).toContain("q='folder\\'raro' in parents and trashed = false");
     });
   });
 

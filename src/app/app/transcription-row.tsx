@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconMenu, MenuItem } from "./icon-menu";
 import { formatDate } from "@/lib/format";
+import { useToast } from "@/components/ui/Toast";
 import {
   assignTranscriptionToProject,
   deleteTranscription,
@@ -30,6 +31,7 @@ export function TranscriptionRow({
   projects: Project[];
 }) {
   const router = useRouter();
+  const { show: toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false); // borrado optimista
 
@@ -37,8 +39,9 @@ export function TranscriptionRow({
 
   async function moveTo(projectId: string | null) {
     setBusy(true);
-    await assignTranscriptionToProject(transcription.id, projectId);
+    const res = await assignTranscriptionToProject(transcription.id, projectId);
     setBusy(false);
+    toast(res.ok ? "Transcripción movida." : "No se pudo mover la transcripción.", res.ok ? "success" : "error");
     router.refresh();
   }
 
@@ -51,7 +54,10 @@ export function TranscriptionRow({
     const res = await createProject(fd);
     if (res.ok) {
       await assignTranscriptionToProject(transcription.id, res.id);
+      toast("Proyecto creado y transcripción movida.", "success");
       router.refresh();
+    } else {
+      toast(res.error ?? "No se pudo crear el proyecto.", "error");
     }
   }
 
@@ -60,10 +66,11 @@ export function TranscriptionRow({
     setHidden(true); // feedback inmediato
     const res = await deleteTranscription(transcription.id);
     if (res.ok) {
+      toast("Transcripción borrada.", "success");
       router.refresh();
     } else {
       setHidden(false); // si falla, la volvemos a mostrar
-      alert(res.error ?? "No se pudo borrar.");
+      toast(res.error ?? "No se pudo borrar.", "error");
     }
   }
 
@@ -71,7 +78,7 @@ export function TranscriptionRow({
 
   return (
     <li
-      className={`flex items-stretch gap-1 rounded-xl border border-slate-200 bg-white transition hover:border-indigo-300 hover:shadow-sm ${
+      className={`flex items-stretch gap-1 rounded-xl border border-slate-200 bg-white transition hover:border-brand-300 hover:shadow-sm ${
         busy ? "opacity-50" : ""
       }`}
     >

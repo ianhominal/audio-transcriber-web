@@ -34,12 +34,17 @@ export function IconMenu({
           setOpen((o) => !o);
         }}
         aria-label={label}
-        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
       >
         ⋯
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-48 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg">
+        <div
+          role="menu"
+          className="absolute right-0 z-30 mt-1 w-48 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
+        >
           {children(() => setOpen(false))}
         </div>
       )}
@@ -60,12 +65,13 @@ export function MenuItem({
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
         onClick();
       }}
-      className={`block w-full rounded-md px-3 py-1.5 text-left hover:bg-slate-100 ${
+      className={`block w-full rounded-md px-3 py-1.5 text-left transition hover:bg-slate-100 ${
         danger ? "text-red-600 hover:bg-red-50" : "text-slate-700"
       }`}
     >

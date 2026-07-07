@@ -36,23 +36,29 @@ export function EmojiPicker({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Elegir ícono"
-        className="flex h-9 w-10 items-center justify-center rounded-md border border-slate-300 text-lg hover:border-indigo-400"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex h-9 w-10 items-center justify-center rounded-lg border border-slate-300 text-lg transition hover:border-brand-400"
       >
         {value || "📁"}
       </button>
       {open && (
-        <div className="absolute left-0 z-20 mt-1 grid w-56 grid-cols-6 gap-1 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div
+          role="menu"
+          className="absolute left-0 z-20 mt-1 grid w-56 grid-cols-6 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+        >
           {EMOJIS.map((e) => (
             <button
               key={e}
               type="button"
+              role="menuitemradio"
+              aria-checked={value === e}
+              aria-label={`Ícono ${e}`}
               onClick={() => {
                 onChange(e);
                 setOpen(false);
               }}
-              className={`rounded p-1 text-lg hover:bg-slate-100 ${
-                value === e ? "bg-indigo-100" : ""
-              }`}
+              className={`rounded p-1 text-lg transition hover:bg-slate-100 ${value === e ? "bg-brand-100" : ""}`}
             >
               {e}
             </button>

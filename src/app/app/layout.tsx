@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { ToastProvider } from "@/components/ui/Toast";
 import LogoutButton from "./logout-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -12,29 +13,42 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/login");
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
-          <Link href="/app" className="flex items-center gap-2.5 font-bold">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white">
-              <WaveIcon />
-            </span>
-            Audio Transcriber
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link href="/descargar" className="text-sm font-medium text-slate-500 hover:text-indigo-600">
-              Descargar app ↓
+    <ToastProvider>
+      <div className="min-h-screen bg-slate-50 text-slate-900">
+        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+            <Link href="/app" className="flex items-center gap-2.5 font-bold tracking-tight">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
+                <WaveIcon />
+              </span>
+              <span>Audio Transcriber</span>
             </Link>
-            <Link href="/app/ajustes" className="text-sm font-medium text-slate-500 hover:text-indigo-600">
-              Ajustes
-            </Link>
-            <span className="hidden text-sm text-slate-500 sm:inline">{user.email}</span>
-            <LogoutButton />
+            <nav className="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="Cuenta">
+              <Link
+                href="/descargar"
+                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-brand-700"
+              >
+                <span className="sm:hidden" aria-hidden="true">
+                  ⬇
+                </span>
+                <span className="hidden sm:inline">Descargar app ↓</span>
+              </Link>
+              <Link
+                href="/app/ajustes"
+                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-brand-700"
+              >
+                Ajustes
+              </Link>
+              <span className="hidden truncate text-sm text-slate-400 md:inline md:max-w-[12rem]" title={user.email}>
+                {user.email}
+              </span>
+              <LogoutButton />
+            </nav>
           </div>
-        </div>
-      </header>
-      {children}
-    </div>
+        </header>
+        {children}
+      </div>
+    </ToastProvider>
   );
 }
 

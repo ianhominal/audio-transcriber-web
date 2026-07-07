@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/Button";
 
 export default function LoginPage() {
   const supabase = createClient();
@@ -51,16 +52,16 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 sm:px-5">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white">
             <WaveIcon />
           </div>
-          <h1 className="text-xl font-bold">Audio Transcriber</h1>
+          <h1 className="text-xl font-bold tracking-tight">Audio Transcriber</h1>
         </div>
 
-        <h2 className="text-lg font-semibold">
+        <h2 className="text-lg font-semibold text-slate-900">
           {mode === "login" ? "Iniciá sesión" : "Creá tu cuenta"}
         </h2>
         <p className="mt-1 text-sm text-slate-500">
@@ -69,7 +70,7 @@ export default function LoginPage() {
 
         <button
           onClick={google}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 font-medium hover:bg-slate-50"
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 font-medium text-slate-700 transition hover:bg-slate-50"
         >
           <GoogleIcon /> Continuar con Google
         </button>
@@ -79,33 +80,51 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-3">
-          <input
-            type="email"
-            placeholder="tu@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-400"
-          />
-          <input
-            type="password"
-            placeholder="Contraseña"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-400"
-          />
+          <div>
+            <label htmlFor="email" className="sr-only">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="tu@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-400"
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="sr-only">
+              Contraseña
+            </label>
+            <input
+              id="password"
+              type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              placeholder="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-400"
+            />
+          </div>
         </div>
 
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-        {info && <p className="mt-3 text-sm text-emerald-600">{info}</p>}
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-red-600">
+            {error}
+          </p>
+        )}
+        {info && (
+          <p role="status" className="mt-3 text-sm text-emerald-600">
+            {info}
+          </p>
+        )}
 
-        <button
-          onClick={submit}
-          disabled={busy || !email || !password}
-          className="mt-4 w-full rounded-lg bg-indigo-600 px-4 py-2.5 font-semibold text-white hover:bg-indigo-700 disabled:bg-slate-300"
-        >
-          {busy ? "..." : mode === "login" ? "Entrar" : "Crear cuenta"}
-        </button>
+        <Button onClick={submit} loading={busy} disabled={!email || !password} size="lg" className="mt-4 w-full">
+          {mode === "login" ? "Entrar" : "Crear cuenta"}
+        </Button>
 
         <p className="mt-4 text-center text-sm text-slate-500">
           {mode === "login" ? "¿No tenés cuenta?" : "¿Ya tenés cuenta?"}{" "}
@@ -115,7 +134,7 @@ export default function LoginPage() {
               setError("");
               setInfo("");
             }}
-            className="font-semibold text-indigo-600 hover:underline"
+            className="font-semibold text-brand-600 hover:underline"
           >
             {mode === "login" ? "Registrate" : "Iniciá sesión"}
           </button>

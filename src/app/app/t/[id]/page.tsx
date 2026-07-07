@@ -40,8 +40,8 @@ export default async function TranscriptionPage({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-8">
-      <Link href="/app" className="text-sm text-slate-500 hover:text-indigo-600">
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+      <Link href="/app" className="text-sm font-medium text-slate-500 hover:text-brand-600">
         ← Volver
       </Link>
       <TranscriptionDetail transcription={t} projects={projectsData ?? []} audioSrc={audioSrc} />

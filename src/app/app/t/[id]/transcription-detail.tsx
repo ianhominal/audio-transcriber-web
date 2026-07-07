@@ -10,6 +10,10 @@ import {
   deleteTranscription,
 } from "../../actions";
 import { EmojiPicker } from "../../emoji-picker";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { Spinner } from "@/components/ui/Spinner";
+import { useToast } from "@/components/ui/Toast";
 
 type Transcription = {
   id: string;
@@ -38,6 +42,7 @@ export function TranscriptionDetail({
   audioSrc: string | null;
 }) {
   const router = useRouter();
+  const { show: toast } = useToast();
   const [title, setTitle] = useState(transcription.title);
   const [text, setText] = useState(transcription.text);
   const [description, setDescription] = useState(transcription.description);
@@ -46,7 +51,6 @@ export function TranscriptionDetail({
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -71,7 +75,6 @@ export function TranscriptionDetail({
   async function save() {
     if (!dirty) return;
     setSaving(true);
-    setMsg(null);
     const res = await updateTranscription(transcription.id, { title, text, description, icon });
     setSaving(false);
     if (res.ok) {
@@ -80,10 +83,11 @@ export function TranscriptionDetail({
       transcription.description = description;
       transcription.icon = icon;
       setJustSaved(true);
+      toast("Guardado.", "success");
       setTimeout(() => setJustSaved(false), 2000);
       router.refresh(); // refresca la lista/título en el resto de la app
     } else {
-      setMsg(res.error ?? "No se pudo guardar.");
+      toast(res.error ?? "No se pudo guardar.", "error");
     }
   }
 
@@ -137,6 +141,7 @@ export function TranscriptionDetail({
     a.click();
     URL.revokeObjectURL(url);
     setExportOpen(false);
+    toast("Exportado como Markdown.", "success");
   }
 
   async function exportDrive() {
@@ -144,7 +149,6 @@ export function TranscriptionDetail({
     // con el login de Supabase: así no dependemos de su provider_token (frágil, no se refresca) ni
     // hace falta re-loguear a nadie. Ver investigación en el changelog del 2026-07-07.
     setExportOpen(false);
-    setMsg(null);
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
     setExportingDrive(true);
     try {
@@ -160,13 +164,15 @@ export function TranscriptionDetail({
         fileName: `${slugifyFileName(title || transcription.audio_name)}.md`,
         content: md,
       });
-      setMsg("Guardado en tu Google Drive ✓");
+      toast("Guardado en tu Google Drive.", "success");
     } catch (e) {
-      if (e instanceof DriveAuthError) {
-        setMsg(e.message);
-      } else {
-        setMsg(e instanceof Error ? e.message : "No se pudo exportar a Google Drive.");
-      }
+      const message =
+        e instanceof DriveAuthError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : "No se pudo exportar a Google Drive.";
+      toast(message, "error");
     } finally {
       setExportingDrive(false);
     }
@@ -179,7 +185,7 @@ export function TranscriptionDetail({
       router.push("/app");
       router.refresh();
     } else {
-      setMsg(res.error ?? "No se pudo borrar.");
+      toast(res.error ?? "No se pudo borrar.", "error");
     }
   }
 
@@ -195,7 +201,7 @@ export function TranscriptionDetail({
               onChange={(e) => setTitle(e.target.value)}
               placeholder={transcription.audio_name || "Sin título"}
               aria-label="Título de la transcripción"
-              className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold text-slate-900 outline-none hover:border-slate-200 focus:border-indigo-400 focus:bg-white"
+              className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold tracking-tight text-slate-900 outline-none hover:border-slate-200 focus:border-brand-400 focus:bg-white"
             />
             <p className="mt-0.5 px-0.5 text-xs text-slate-400">🎵 {transcription.audio_name}</p>
           </div>
@@ -215,7 +221,8 @@ export function TranscriptionDetail({
         onChange={(e) => setDescription(e.target.value)}
         rows={3}
         placeholder="Descripción o notas (opcional)…"
-        className="mt-4 w-full resize-y rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none"
+        aria-label="Descripción o notas"
+        className="mt-4 w-full resize-y rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-brand-400 focus:outline-none"
       />
 
       {/* Reproductor: usa una URL firmada temporal (bucket privado). */}
@@ -236,7 +243,7 @@ export function TranscriptionDetail({
           id="project"
           value={projectId ?? ""}
           onChange={(e) => changeProject(e.target.value)}
-          className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+          className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
         >
           <option value="">Sin proyecto</option>
           {projects.map((p) => (
@@ -253,82 +260,58 @@ export function TranscriptionDetail({
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={14}
-        className="mt-5 w-full resize-y rounded-xl border border-slate-300 p-4 text-slate-800 focus:border-indigo-400 focus:outline-none"
+        aria-label="Texto de la transcripción"
+        className="mt-5 w-full resize-y rounded-xl border border-slate-300 p-4 text-slate-800 focus:border-brand-400 focus:outline-none"
       />
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          onClick={save}
-          disabled={!dirty || saving}
-          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${
-            justSaved
-              ? "bg-emerald-600"
-              : "bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
-          }`}
-        >
+        <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>
           {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
-        </button>
-        <button
-          onClick={copy}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
+        </Button>
+        <Button variant="secondary" onClick={copy}>
           {copied ? "Copiado ✓" : "Copiar"}
-        </button>
-        <button
-          onClick={download}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
+        </Button>
+        <Button variant="secondary" onClick={download}>
           Descargar .txt
-        </button>
+        </Button>
         {audioSrc && (
-          <button
-            onClick={downloadAudio}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
+          <Button variant="secondary" onClick={downloadAudio}>
             Descargar audio
-          </button>
+          </Button>
         )}
         <div ref={exportRef} className="relative">
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setExportOpen((o) => !o)}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            aria-haspopup="menu"
+            aria-expanded={exportOpen}
           >
             Exportar ▾
-          </button>
+          </Button>
           {exportOpen && (
-            <div className="absolute left-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+            <div role="menu" className="absolute left-0 z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
               <button
+                role="menuitem"
                 onClick={exportMarkdown}
-                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
               >
                 📝 Obsidian / Markdown (.md)
               </button>
               <button
+                role="menuitem"
                 onClick={exportDrive}
                 disabled={exportingDrive}
-                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
               >
-                📤 {exportingDrive ? "Exportando…" : "Google Drive"}
+                {exportingDrive ? <Spinner size="xs" /> : "📤"} {exportingDrive ? "Exportando…" : "Google Drive"}
               </button>
             </div>
           )}
         </div>
-        <button
-          onClick={remove}
-          className="ml-auto rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-        >
+        <Button variant="danger-outline" onClick={remove} className="ml-auto">
           Borrar
-        </button>
-        {msg && <span className="text-sm text-slate-500">{msg}</span>}
+        </Button>
       </div>
     </div>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-      {children}
-    </span>
   );
 }

@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { createProject } from "./actions";
 import { EmojiPicker } from "./emoji-picker";
+import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 /** Botón + formulario inline para crear un proyecto. */
 export function NewProjectButton() {
@@ -11,6 +13,7 @@ export function NewProjectButton() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const { show: toast } = useToast();
 
   async function handle(formData: FormData) {
     formData.set("icon", icon);
@@ -25,13 +28,14 @@ export function NewProjectButton() {
     setOpen(false);
     setIcon("📁");
     formRef.current?.reset();
+    toast("Proyecto creado.", "success");
   }
 
   if (!open) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-500 hover:border-indigo-400 hover:text-indigo-600"
+        className="w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-500 transition hover:border-brand-400 hover:text-brand-600"
       >
         + Nuevo proyecto
       </button>
@@ -39,36 +43,37 @@ export function NewProjectButton() {
   }
 
   return (
-    <form ref={formRef} action={handle} className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
+    <form
+      ref={formRef}
+      action={handle}
+      className="space-y-2 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+    >
       <div className="flex gap-2">
         <EmojiPicker value={icon} onChange={setIcon} />
         <input
           name="name"
           autoFocus
           placeholder="Nombre del proyecto"
-          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"
+          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
           aria-label="Nombre del proyecto"
         />
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={pending}
-          className="flex-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-        >
+        <Button type="submit" size="sm" loading={pending} className="flex-1">
           {pending ? "Creando…" : "Crear"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           onClick={() => {
             setOpen(false);
             setError(null);
           }}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
         >
           Cancelar
-        </button>
+        </Button>
       </div>
     </form>
   );

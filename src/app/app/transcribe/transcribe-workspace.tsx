@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { createProject } from "../actions";
 import { EmojiPicker } from "../emoji-picker";
 import { formatFileSize, formatDuration, formatRecordingFileName } from "@/lib/format";
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+import { useToast } from "@/components/ui/Toast";
 
 // Formatos que Groq/Whisper acepta nativamente (mp4/mpeg incluidos: extrae el audio del video).
 const SUPPORTED = [
@@ -50,6 +53,7 @@ export function TranscribeWorkspace({
   initialProject?: string;
 }) {
   const router = useRouter();
+  const { show: toast } = useToast();
   const [destino, setDestino] = useState<string>(initialProject); // "" | projectId | "__new__"
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("📁");
@@ -268,6 +272,8 @@ export function TranscribeWorkspace({
     }
 
     // Procesar en serie (respeta la cuota de Groq y da progreso claro).
+    let okCount = 0;
+    let failCount = 0;
     for (const item of toProcess) {
       // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app.
       if (item.file.size > WEB_MAX_BYTES) {
@@ -275,6 +281,7 @@ export function TranscribeWorkspace({
           status: "error",
           error: "Muy grande para la web (+4,5 MB). Usá la app de escritorio.",
         });
+        failCount++;
         continue;
       }
       patch(item.key, { status: "working", error: undefined });
@@ -292,13 +299,21 @@ export function TranscribeWorkspace({
           status: data.duplicate ? "duplicate" : "done",
           resultId: data.id ?? undefined,
         });
+        okCount++;
       } catch (e) {
         patch(item.key, { status: "error", error: e instanceof Error ? e.message : "Error." });
+        failCount++;
       }
     }
 
     runningRef.current = false;
     setRunning(false);
+    if (okCount > 0) {
+      toast(`${okCount} audio${okCount > 1 ? "s" : ""} transcrito${okCount > 1 ? "s" : ""}.`, "success");
+    }
+    if (failCount > 0) {
+      toast(`${failCount} audio${failCount > 1 ? "s" : ""} no se pudo${failCount > 1 ? "ieron" : ""} transcribir.`, "error");
+    }
     router.refresh(); // que el dashboard vea las nuevas
   }
 
@@ -308,21 +323,24 @@ export function TranscribeWorkspace({
   const hasOversize = items.some((i) => i.file.size > WEB_MAX_BYTES);
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-8">
-      <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Nueva transcripción</h1>
-        <Link href="/app" className="text-sm font-medium text-slate-500 hover:text-indigo-600">
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Nueva transcripción</h1>
+        <Link href="/app" className="text-sm font-medium text-slate-500 hover:text-brand-600">
           ← Volver
         </Link>
       </div>
 
       {/* Destino — siempre visible, para saber DÓNDE van a caer los audios */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <label className="mb-1.5 block text-sm font-semibold text-slate-600">Proyecto destino</label>
+        <label htmlFor="destino" className="mb-1.5 block text-sm font-semibold text-slate-600">
+          Proyecto destino
+        </label>
         <select
+          id="destino"
           value={destino}
           onChange={(e) => setDestino(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-400"
         >
           <option value="">Sin proyecto</option>
           {projects.map((p) => (
@@ -341,7 +359,8 @@ export function TranscribeWorkspace({
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Nombre del proyecto nuevo"
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"
+              aria-label="Nombre del proyecto nuevo"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
             />
           </div>
         )}
@@ -350,7 +369,11 @@ export function TranscribeWorkspace({
         <div className="mt-4 flex flex-wrap gap-4">
           <label className="flex flex-col text-sm">
             <span className="mb-1 font-semibold text-slate-500">Idioma</span>
-            <select value={language} onChange={(e) => changeLanguage(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2">
+            <select
+              value={language}
+              onChange={(e) => changeLanguage(e.target.value)}
+              className="rounded-lg border border-slate-300 px-3 py-2 focus:border-brand-400"
+            >
               <option value="es">Español</option>
               <option value="en">Inglés</option>
               <option value="auto">Automático</option>
@@ -358,7 +381,11 @@ export function TranscribeWorkspace({
           </label>
           <label className="flex flex-col text-sm">
             <span className="mb-1 font-semibold text-slate-500">Calidad</span>
-            <select value={model} onChange={(e) => setModel(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2">
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="rounded-lg border border-slate-300 px-3 py-2 focus:border-brand-400"
+            >
               <option value="whisper-large-v3-turbo">Rápida (turbo)</option>
               <option value="whisper-large-v3">Máxima (large-v3)</option>
             </select>
@@ -368,6 +395,8 @@ export function TranscribeWorkspace({
 
       {/* Dropzone múltiple */}
       <div
+        role="button"
+        tabIndex={0}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -375,8 +404,15 @@ export function TranscribeWorkspace({
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
+        aria-label="Elegir o arrastrar audios para transcribir"
         className={`mt-4 cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition ${
-          dragOver ? "border-indigo-500 bg-indigo-50" : "border-slate-300 bg-white hover:bg-slate-50"
+          dragOver ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-white hover:border-brand-300 hover:bg-slate-50"
         }`}
       >
         <input
@@ -385,51 +421,44 @@ export function TranscribeWorkspace({
           multiple
           accept={SUPPORTED.join(",")}
           className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
           onChange={(e) => {
             addFiles(e.target.files);
             e.target.value = "";
           }}
         />
-        <p className="font-medium text-slate-700">Arrastrá tus audios acá</p>
-        <p className="mt-1 text-sm text-slate-500">o hacé clic para elegirlos · podés cargar varios · mp3, wav, ogg, m4a…</p>
+        <p className="text-2xl" aria-hidden="true">
+          📤
+        </p>
+        <p className="mt-2 font-medium text-slate-700">Arrastrá tus audios acá</p>
+        <p className="mt-1 text-sm text-slate-500">
+          o hacé clic para elegirlos · podés cargar varios · mp3, wav, ogg, m4a…
+        </p>
       </div>
 
       {/* Grabar / capturar en vivo */}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {!recording ? (
-          <button
-            onClick={startMicRecording}
-            disabled={capturing}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-          >
+          <Button type="button" variant="secondary" onClick={startMicRecording} disabled={capturing}>
             🎙️ Grabar
-          </button>
+          </Button>
         ) : (
-          <button
-            onClick={stopMicRecording}
-            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-          >
-            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+          <Button type="button" variant="danger" onClick={stopMicRecording}>
+            <span className="h-2 w-2 animate-pulse rounded-full bg-white" aria-hidden="true" />
             Detener · {formatDuration(recordingSeconds)}
-          </button>
+          </Button>
         )}
 
         {!capturing ? (
-          <button
-            onClick={startMeetingCapture}
-            disabled={recording}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-          >
+          <Button type="button" variant="secondary" onClick={startMeetingCapture} disabled={recording}>
             🖥️ Capturar reunión
-          </button>
+          </Button>
         ) : (
-          <button
-            onClick={stopMeetingCapture}
-            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-          >
-            <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+          <Button type="button" variant="danger" onClick={stopMeetingCapture}>
+            <span className="h-2 w-2 animate-pulse rounded-full bg-white" aria-hidden="true" />
             Detener · {formatDuration(captureSeconds)}
-          </button>
+          </Button>
         )}
       </div>
       {capturing && (
@@ -443,7 +472,7 @@ export function TranscribeWorkspace({
 
       {/* Cola de audios */}
       {items.length > 0 && (
-        <ul className="mt-4 space-y-2">
+        <ul className="mt-4 space-y-2" aria-live="polite">
           {items.map((it) => (
             <li
               key={it.key}
@@ -459,15 +488,15 @@ export function TranscribeWorkspace({
                 </p>
               </div>
               {(it.status === "done" || it.status === "duplicate") && it.resultId && (
-                <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-indigo-600 hover:underline">
+                <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-brand-600 hover:underline">
                   Ver
                 </Link>
               )}
               {it.status === "pending" && !running && (
                 <button
                   onClick={() => removeItem(it.key)}
-                  className="text-slate-300 hover:text-red-500"
-                  aria-label="Quitar"
+                  className="rounded p-0.5 text-slate-300 transition hover:text-red-500"
+                  aria-label={`Quitar ${it.file.name} de la cola`}
                 >
                   ✕
                 </button>
@@ -479,32 +508,35 @@ export function TranscribeWorkspace({
 
       {/* Derivación a la app de escritorio para archivos grandes (límite de Vercel) */}
       {hasOversize && (
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Algunos audios pesan más de 4,5 MB y la web no los soporta.{" "}
-          <Link href="/descargar" className="font-semibold underline hover:text-amber-900">
-            Descargá la app de escritorio
-          </Link>{" "}
-          para sincronizar archivos grandes sin límite.
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span aria-hidden="true">⚠️</span>
+          <p>
+            Algunos audios pesan más de 4,5 MB y la web no los soporta.{" "}
+            <Link href="/descargar" className="font-semibold underline hover:text-amber-900">
+              Descargá la app de escritorio
+            </Link>{" "}
+            para sincronizar archivos grandes sin límite.
+          </p>
         </div>
       )}
 
-      {topError && <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{topError}</p>}
+      {topError && (
+        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {topError}
+        </p>
+      )}
 
       {/* Acción principal */}
-      <div className="mt-5 flex items-center gap-3">
-        <button
-          onClick={run}
-          disabled={running || pendingCount === 0}
-          className="rounded-lg bg-indigo-600 px-5 py-2.5 font-semibold text-white transition hover:bg-indigo-700 disabled:bg-slate-300"
-        >
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <Button onClick={run} loading={running} disabled={pendingCount === 0} size="lg">
           {running
             ? "Transcribiendo…"
             : pendingCount > 0
               ? `Transcribir ${pendingCount} audio${pendingCount > 1 ? "s" : ""}`
               : "Transcribir"}
-        </button>
+        </Button>
         {allDone && (
-          <Link href={dashboardHref} className="text-sm font-semibold text-indigo-600 hover:underline">
+          <Link href={dashboardHref} className="text-sm font-semibold text-brand-600 hover:underline">
             {doneCount > 0 ? `Ver ${doneCount} en el dashboard →` : "Ir al dashboard →"}
           </Link>
         )}
@@ -514,9 +546,9 @@ export function TranscribeWorkspace({
 }
 
 function StatusDot({ status }: { status: Status }) {
-  const map: Record<Status, { label: string; cls: string }> = {
+  if (status === "working") return <Spinner size="sm" className="shrink-0 text-brand-500" />;
+  const map: Record<Exclude<Status, "working">, { label: string; cls: string }> = {
     pending: { label: "⏳", cls: "" },
-    working: { label: "🔄", cls: "animate-pulse" },
     done: { label: "✅", cls: "" },
     duplicate: { label: "⏭️", cls: "" },
     error: { label: "❌", cls: "" },

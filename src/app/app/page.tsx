@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { buttonClasses } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { NewProjectButton } from "./new-project-button";
-import { ProjectRow } from "./project-row";
+import { ProjectTree } from "./project-tree";
 import { TranscriptionRow } from "./transcription-row";
 
 type Transcription = {
@@ -14,7 +16,7 @@ type Transcription = {
   project_id: string | null;
 };
 
-type Project = { id: string; name: string; icon: string };
+type Project = { id: string; name: string; icon: string; parent_project_id: string | null; sync_origin: string };
 
 export default async function Dashboard({
   searchParams,
@@ -27,7 +29,7 @@ export default async function Dashboard({
   const [{ data: projectsData }, { data: countRows }] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, name, icon")
+      .select("id, name, icon, parent_project_id, sync_origin")
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
     supabase.from("transcriptions").select("project_id").is("deleted_at", null),
@@ -43,6 +45,7 @@ export default async function Dashboard({
     else noneCount++;
   }
   const total = (countRows ?? []).length;
+  const countsByProjectId = Object.fromEntries(counts); // Map no es serializable al pasarlo a un Client Component
 
   // Lista filtrada.
   let query = supabase
@@ -64,23 +67,26 @@ export default async function Dashboard({
   const newHref = activeProject ? `/app/transcribe?project=${activeProject.id}` : "/app/transcribe";
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-6 px-5 py-8 md:grid-cols-[15rem_1fr]">
+    <div className="mx-auto max-w-6xl gap-6 px-4 py-6 sm:px-6 sm:py-8 md:grid md:grid-cols-[16rem_1fr] md:items-start">
       {/* Sidebar de proyectos */}
-      <aside className="space-y-4">
-        <div>
-          <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <aside className="mb-6 space-y-3 md:sticky md:top-20 md:mb-0">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <p className="mb-2 px-1.5 pt-0.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Proyectos
           </p>
-          <nav className="space-y-0.5">
+          <nav className="max-h-[65vh] space-y-0.5 overflow-y-auto pr-0.5">
             <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
-            {projects.map((p) => (
-              <ProjectRow
-                key={p.id}
-                project={p}
-                active={filter === p.id}
-                count={counts.get(p.id) ?? 0}
-              />
-            ))}
+            <ProjectTree
+              projects={projects.map((p) => ({
+                id: p.id,
+                name: p.name,
+                icon: p.icon,
+                parentProjectId: p.parent_project_id,
+                syncOrigin: p.sync_origin,
+              }))}
+              counts={countsByProjectId}
+              activeProjectId={filter && filter !== "none" ? filter : null}
+            />
             <SidebarLink
               href="/app?project=none"
               active={filter === "none"}
@@ -94,24 +100,31 @@ export default async function Dashboard({
       </aside>
 
       {/* Lista principal */}
-      <main>
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-slate-900">{heading}</h1>
-          <Link
-            href={newHref}
-            className="rounded-lg bg-indigo-600 px-4 py-2.5 font-semibold text-white hover:bg-indigo-700"
-          >
+      <main className="min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900">{heading}</h1>
+          <Link href={newHref} className={buttonClasses({ size: "md" })}>
             + Nueva transcripción
           </Link>
         </div>
 
         {items.length === 0 ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-            <p className="font-medium text-slate-700">Nada por acá todavía</p>
-            <p className="mt-1 text-sm text-slate-500">
-              Subí un audio y tu transcripción va a aparecer en esta lista.
-            </p>
-          </div>
+          <EmptyState
+            className="mt-8"
+            icon="🎙️"
+            title="Todavía no hay transcripciones acá"
+            description="Grabá tu voz, capturá una reunión o subí un audio y va a aparecer en esta lista."
+            action={
+              <>
+                <Link href={newHref} className={buttonClasses({ size: "sm" })}>
+                  🎙️ Grabar
+                </Link>
+                <Link href={newHref} className={buttonClasses({ variant: "secondary", size: "sm" })}>
+                  📤 Subir audio
+                </Link>
+              </>
+            }
+          />
         ) : (
           <ul className="mt-6 space-y-3">
             {items.map((t) => (
@@ -140,13 +153,13 @@ function SidebarLink({
   return (
     <Link
       href={href}
-      className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm ${
-        active ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-700 hover:bg-slate-100"
+      className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
+        active ? "bg-brand-50 font-semibold text-brand-700" : "text-slate-700 hover:bg-slate-100"
       }`}
     >
       <span className="text-base leading-none">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="shrink-0 text-xs text-slate-400">{count}</span>
+      <span className="shrink-0 text-xs tabular-nums text-slate-400">{count}</span>
     </Link>
   );
 }

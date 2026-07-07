@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { buttonClasses } from "@/components/ui/Button";
+import { DriveFolderConnect } from "./drive-folder-connect";
 
 const DRIVE_STATUS_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Conectado con Google Drive." },
@@ -38,42 +40,59 @@ export default async function AjustesPage({
   const message = driveStatus ? DRIVE_STATUS_MESSAGES[driveStatus] : null;
 
   return (
-    <div className="mx-auto max-w-2xl px-5 py-8">
-      <h1 className="text-2xl font-bold text-slate-900">Ajustes</h1>
+    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
+      <h1 className="text-2xl font-bold tracking-tight text-slate-900">Ajustes</h1>
+      <p className="mt-1 text-sm text-slate-500">Preferencias de tu cuenta e integraciones.</p>
 
       {message && (
         <div
-          className={`mt-4 rounded-lg border px-4 py-2.5 text-sm ${
+          role="status"
+          className={`mt-5 flex items-start gap-2 rounded-xl border px-4 py-3 text-sm ${
             message.tone === "ok"
               ? "border-emerald-200 bg-emerald-50 text-emerald-700"
               : "border-red-200 bg-red-50 text-red-700"
           }`}
         >
-          {message.text}
+          <span aria-hidden="true">{message.tone === "ok" ? "✓" : "✕"}</span>
+          <span>{message.text}</span>
         </div>
       )}
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
-        <h2 className="font-semibold text-slate-900">Google Drive</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Conectá tu cuenta para que tus transcripciones se mantengan sincronizadas con Drive
-          automáticamente.
-        </p>
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-lg" aria-hidden="true">
+            ☁️
+          </span>
+          <div>
+            <h2 className="font-semibold text-slate-900">Google Drive</h2>
+            <p className="text-sm text-slate-500">
+              Conectá tu cuenta para que tus transcripciones se mantengan sincronizadas con Drive automáticamente.
+            </p>
+          </div>
+        </div>
 
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           {connection ? (
             <p className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-              Google Drive conectado ✓
+              <span aria-hidden="true">✓</span> Google Drive conectado
             </p>
           ) : (
-            <a
-              href="/api/drive/connect"
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
+            <a href="/api/drive/connect" className={buttonClasses({ size: "md" })}>
               Conectar Google Drive
             </a>
           )}
         </div>
+
+        {connection && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <p className="text-sm text-slate-500">
+              Conectá una carpeta existente para traerla con toda su jerarquía de subcarpetas y notas.
+            </p>
+            <div className="mt-3">
+              <DriveFolderConnect />
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
