@@ -38,15 +38,13 @@ export default async function DescargarPage() {
         </p>
 
         <div className="mt-10">
-          {/* TODO: reemplazar por la URL del release de GitHub cuando esté publicado */}
-          <button
-            type="button"
-            disabled
-            className="cursor-not-allowed rounded-lg bg-indigo-600 px-8 py-4 text-lg font-semibold text-white opacity-50"
+          <a
+            href="https://github.com/ianhominal/audio-transcriber-web/releases/download/desktop-v1.0/AudioTranscriber.exe"
+            className="inline-block rounded-lg bg-indigo-600 px-8 py-4 text-lg font-semibold text-white transition hover:bg-indigo-700"
           >
             ⬇ Descargar para Windows
-          </button>
-          <p className="mt-3 text-sm text-slate-400">Próximamente</p>
+          </a>
+          <p className="mt-3 text-sm text-slate-400">Windows 10/11 · 64 bits · ~155 MB</p>
         </div>
       </section>
 
