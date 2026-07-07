@@ -6,6 +6,7 @@ import {
   validateProjectName,
   formatRecordingFileName,
   buildMarkdownExport,
+  parseMarkdownExport,
   slugifyFileName,
 } from "./format";
 
@@ -102,6 +103,48 @@ describe("buildMarkdownExport", () => {
   it("usa 'Sin título' si el título viene vacío", () => {
     const md = buildMarkdownExport({ title: "   ", createdAt: "2026-07-06T15:40:44Z", text: "x" });
     expect(md).toContain('title: "Sin título"');
+  });
+});
+
+describe("parseMarkdownExport", () => {
+  it("hace round-trip exacto con buildMarkdownExport (con project)", () => {
+    const md = buildMarkdownExport({
+      title: "Reunión de equipo",
+      createdAt: "2026-07-06T15:40:44Z",
+      projectName: "Trabajo",
+      text: "Línea 1.\nLínea 2.",
+    });
+    expect(parseMarkdownExport(md)).toEqual({ title: "Reunión de equipo", text: "Línea 1.\nLínea 2." });
+  });
+
+  it("hace round-trip exacto sin project", () => {
+    const md = buildMarkdownExport({ title: "Nota", createdAt: "2026-07-06T15:40:44Z", text: "Hola." });
+    expect(parseMarkdownExport(md)).toEqual({ title: "Nota", text: "Hola." });
+  });
+
+  it("desescapa comillas dobles y backslashes en el título", () => {
+    const md = buildMarkdownExport({
+      title: 'Reunión "importante"',
+      createdAt: "2026-07-06T15:40:44Z",
+      text: "x",
+    });
+    expect(parseMarkdownExport(md).title).toBe('Reunión "importante"');
+  });
+
+  it("devuelve title null y el contenido completo si no hay frontmatter", () => {
+    expect(parseMarkdownExport("Solo texto plano, sin frontmatter.")).toEqual({
+      title: null,
+      text: "Solo texto plano, sin frontmatter.",
+    });
+  });
+
+  it("devuelve el contenido completo si el frontmatter no cierra", () => {
+    const broken = '---\ntitle: "Sin cierre"\nEsto sigue sin un segundo ---';
+    expect(parseMarkdownExport(broken)).toEqual({ title: null, text: broken });
+  });
+
+  it("tolera contenido vacío", () => {
+    expect(parseMarkdownExport("")).toEqual({ title: null, text: "" });
   });
 });
 

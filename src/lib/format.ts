@@ -72,6 +72,47 @@ export function buildMarkdownExport({ title, createdAt, projectName, text }: Mar
   return lines.join("\n");
 }
 
+export type ParsedMarkdownExport = { title: string | null; text: string };
+
+/**
+ * Inverso de `buildMarkdownExport`: separa el frontmatter YAML del cuerpo y extrae `title`.
+ * Usado por el motor de sync de Drive (doc 09 Fase 2) al bajar un `.md` editado en Drive, para no
+ * guardar el frontmatter como si fuera parte del texto de la transcripción.
+ *
+ * No es un parser YAML genérico — solo entiende el formato propio que genera `buildMarkdownExport`
+ * (comillas dobles con `\"`/`\\` escapados). Si el contenido no tiene ese frontmatter (ej. un .md
+ * que el usuario creó a mano en Drive, sin pasar por la app), devuelve `title: null` y el contenido
+ * completo como texto, sin lanzar.
+ */
+export function parseMarkdownExport(content: string): ParsedMarkdownExport {
+  const raw = content ?? "";
+  const lines = raw.split("\n");
+
+  if (lines[0] !== "---") return { title: null, text: raw };
+
+  let closingIndex = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === "---") {
+      closingIndex = i;
+      break;
+    }
+  }
+  if (closingIndex === -1) return { title: null, text: raw };
+
+  let title: string | null = null;
+  for (let i = 1; i < closingIndex; i++) {
+    const match = lines[i].match(/^title:\s*"((?:[^"\\]|\\.)*)"\s*$/);
+    if (match) {
+      title = match[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+      break;
+    }
+  }
+
+  const bodyLines = lines.slice(closingIndex + 1);
+  if (bodyLines[0] === "") bodyLines.shift(); // la línea en blanco que agrega buildMarkdownExport tras el "---"
+  return { title, text: bodyLines.join("\n") };
+}
+
 /** Sanitiza un nombre para usarlo como nombre de archivo (sin caracteres inválidos en Windows/macOS). */
 export function slugifyFileName(name: string, fallback = "transcripcion"): string {
   const cleaned = (name ?? "")
