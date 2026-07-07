@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getApiUser } from "@/lib/supabase/api";
 import { AUDIO_BUCKET, audioExtension, buildAudioObjectPath } from "@/lib/storage";
+import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -46,6 +47,23 @@ export async function POST(req: NextRequest) {
   }
 
   const audioName = file.name || "audio";
+
+  // 1.4) Límite diario de transcripciones por usuario.
+  //      Se cuentan también las transcripciones soft-deleted: el usuario ya consumió cuota
+  //      real de Groq al crearlas, sin importar si luego las movió a la papelera.
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: dailyCount } = await supabase
+    .from("transcriptions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", oneDayAgo);
+
+  if (isOverDailyLimit(dailyCount ?? 0, DAILY_LIMIT)) {
+    return NextResponse.json(
+      { error: "Llegaste al límite diario de transcripciones. Probá mañana o escribinos." },
+      { status: 429 }
+    );
+  }
 
   // 1.5) Dedupe: si ya existe una transcripción con el mismo nombre y tamaño para este
   //      usuario, no volvemos a llamar a Groq ni a duplicar. Devolvemos la existente.
