@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
+import { requestGoogleDriveAccessToken, uploadMarkdownToDrive, DriveAuthError } from "@/lib/googleDrive";
 import {
   updateTranscription,
   assignTranscriptionToProject,
@@ -47,6 +48,7 @@ export function TranscriptionDetail({
   const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportingDrive, setExportingDrive] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -137,17 +139,37 @@ export function TranscriptionDetail({
     setExportOpen(false);
   }
 
-  function exportDrive() {
-    // TODO(export-drive): requiere agregar el scope "https://www.googleapis.com/auth/drive.file" al
-    // signInWithOAuth de Google en src/app/login/page.tsx y volver a autenticar a los usuarios
-    // existentes (el provider_token de la sesión actual no incluye ese scope todavía). Además, al ser
-    // un scope sensible, probablemente dispare el proceso de verificación de OAuth consent screen en
-    // Google Cloud Console. Investigado el 2026-07-07 (ver changelog de esa fecha). Con el scope y el
-    // provider_token disponibles, el upload sería un POST multipart a
-    // https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart con el Markdown generado
-    // por buildMarkdownExport como contenido.
-    setMsg("Exportar a Google Drive todavía no está disponible (requiere un cambio de permisos de Google).");
+  async function exportDrive() {
+    // Pide un access token de Drive ON-DEMAND con Google Identity Services (modelo de token), NO
+    // con el login de Supabase: así no dependemos de su provider_token (frágil, no se refresca) ni
+    // hace falta re-loguear a nadie. Ver investigación en el changelog del 2026-07-07.
     setExportOpen(false);
+    setMsg(null);
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    setExportingDrive(true);
+    try {
+      const accessToken = await requestGoogleDriveAccessToken(clientId);
+      const md = buildMarkdownExport({
+        title: title || transcription.audio_name,
+        createdAt: transcription.created_at,
+        projectName,
+        text,
+      });
+      await uploadMarkdownToDrive({
+        accessToken,
+        fileName: `${slugifyFileName(title || transcription.audio_name)}.md`,
+        content: md,
+      });
+      setMsg("Guardado en tu Google Drive ✓");
+    } catch (e) {
+      if (e instanceof DriveAuthError) {
+        setMsg(e.message);
+      } else {
+        setMsg(e instanceof Error ? e.message : "No se pudo exportar a Google Drive.");
+      }
+    } finally {
+      setExportingDrive(false);
+    }
   }
 
   async function remove() {
@@ -283,9 +305,10 @@ export function TranscriptionDetail({
               </button>
               <button
                 onClick={exportDrive}
-                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-100"
+                disabled={exportingDrive}
+                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50"
               >
-                📤 Google Drive <span className="text-xs">(próximamente)</span>
+                📤 {exportingDrive ? "Exportando…" : "Google Drive"}
               </button>
             </div>
           )}
