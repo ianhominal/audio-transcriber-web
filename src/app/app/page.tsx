@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { buildProjectTree, rollUpProjectCounts } from "@/lib/drive/tree";
 import { NewProjectButton } from "./new-project-button";
 import { ProjectTree } from "./project-tree";
 import { TranscriptionRow } from "./transcription-row";
@@ -45,7 +46,20 @@ export default async function Dashboard({
     else noneCount++;
   }
   const total = (countRows ?? []).length;
-  const countsByProjectId = Object.fromEntries(counts); // Map no es serializable al pasarlo a un Client Component
+
+  // Árbol de proyectos (jerarquía Drive-sync v2) armado UNA vez acá: sirve tanto para pasarle la
+  // lista plana a <ProjectTree> (que lo re-arma client-side, barato) como para el roll-up de
+  // conteos — un proyecto padre muestra el total INCLUYENDO a sus descendientes, no solo el
+  // propio (`rollUpProjectCounts`, puro, en src/lib/drive/tree.ts).
+  const projectTreeInput = projects.map((p) => ({
+    id: p.id,
+    name: p.name,
+    icon: p.icon,
+    parentProjectId: p.parent_project_id,
+    syncOrigin: p.sync_origin,
+  }));
+  const projectTree = buildProjectTree(projectTreeInput);
+  const countsByProjectId = rollUpProjectCounts(projectTree, Object.fromEntries(counts)); // Map no es serializable al pasarlo a un Client Component
 
   // Lista filtrada.
   let query = supabase
@@ -77,13 +91,7 @@ export default async function Dashboard({
           <nav className="max-h-[65vh] space-y-0.5 overflow-y-auto pr-0.5">
             <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
             <ProjectTree
-              projects={projects.map((p) => ({
-                id: p.id,
-                name: p.name,
-                icon: p.icon,
-                parentProjectId: p.parent_project_id,
-                syncOrigin: p.sync_origin,
-              }))}
+              projects={projectTreeInput}
               counts={countsByProjectId}
               activeProjectId={filter && filter !== "none" ? filter : null}
             />

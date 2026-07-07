@@ -19,7 +19,9 @@ export async function GET(req: NextRequest) {
 
     let projectsQuery = supabase
       .from("projects")
-      .select("id, name, icon, description, created_at, updated_at, deleted_at")
+      // parent_project_id + sync_origin (Drive-sync v2, doc 10): agregado backward-compatible —
+      // un cliente desktop viejo que no los conoce simplemente los ignora en el JSON.
+      .select("id, name, icon, description, parent_project_id, sync_origin, created_at, updated_at, deleted_at")
       .eq("user_id", user.id);
 
     let transcriptionsQuery = supabase

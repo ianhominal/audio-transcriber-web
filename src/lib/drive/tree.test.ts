@@ -2,8 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   buildProjectTree,
   planDriveImport,
+  rollUpProjectCounts,
+  collectProjectSubtreeIds,
+  wouldCreateProjectCycle,
   type ProjectTreeInput,
   type DriveTreeNode,
+  type ProjectParentLink,
 } from "./tree";
 
 describe("buildProjectTree", () => {
@@ -161,5 +165,114 @@ describe("planDriveImport", () => {
     // n1 (depth 1→2 al crearlo) y n2 sí se crean; al llegar a n2 con depth=3 se corta antes de entrar.
     expect(plan.projectsToCreate.map((s) => s.driveFolderId)).toEqual(["n1", "n2"]);
     expect(plan.depthTruncated).toBe(true);
+  });
+});
+
+describe("rollUpProjectCounts", () => {
+  it("un padre acumula su conteo directo + el de todos sus descendientes (árbol de 3 niveles)", () => {
+    const projects: ProjectTreeInput[] = [
+      { id: "root", name: "Reuniones", icon: "", parentProjectId: null, syncOrigin: "drive" },
+      { id: "child", name: "Semana 1", icon: "", parentProjectId: "root", syncOrigin: "drive" },
+      { id: "grandchild", name: "Lunes", icon: "", parentProjectId: "child", syncOrigin: "drive" },
+      { id: "normal", name: "Personal", icon: "📁", parentProjectId: null, syncOrigin: "local" },
+    ];
+    const tree = buildProjectTree(projects);
+    const totals = rollUpProjectCounts(tree, { root: 1, child: 2, grandchild: 3, normal: 5 });
+
+    expect(totals.grandchild).toBe(3); // hoja: igual a su directo
+    expect(totals.child).toBe(5); // 2 propio + 3 del nieto
+    expect(totals.root).toBe(6); // 1 propio + 2 + 3 de sus descendientes
+    expect(totals.normal).toBe(5); // sin hijos: igual a su directo
+  });
+
+  it("un proyecto sin conteo directo (no aparece en el map) cuenta como 0", () => {
+    const projects: ProjectTreeInput[] = [
+      { id: "root", name: "Reuniones", icon: "", parentProjectId: null, syncOrigin: "drive" },
+      { id: "child", name: "Semana 1", icon: "", parentProjectId: "root", syncOrigin: "drive" },
+    ];
+    const tree = buildProjectTree(projects);
+    const totals = rollUpProjectCounts(tree, { child: 4 });
+
+    expect(totals.root).toBe(4);
+    expect(totals.child).toBe(4);
+  });
+});
+
+describe("collectProjectSubtreeIds", () => {
+  it("borrar la raíz de un árbol de 3 niveles arrastra a hijo y nieto", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "child", parentProjectId: "root" },
+      { id: "grandchild", parentProjectId: "child" },
+      { id: "other", parentProjectId: null },
+    ];
+    const ids = collectProjectSubtreeIds("root", links);
+    expect(Array.from(ids).sort()).toEqual(["child", "grandchild", "root"]);
+  });
+
+  it("borrar un nodo intermedio arrastra solo su propio subárbol, no a la raíz ni a hermanos", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "child", parentProjectId: "root" },
+      { id: "grandchild", parentProjectId: "child" },
+      { id: "sibling", parentProjectId: "root" },
+    ];
+    const ids = collectProjectSubtreeIds("child", links);
+    expect(Array.from(ids).sort()).toEqual(["child", "grandchild"]);
+  });
+
+  it("borrar una hoja sin hijos devuelve solo su propio id", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "leaf", parentProjectId: "root" },
+    ];
+    expect(Array.from(collectProjectSubtreeIds("leaf", links))).toEqual(["leaf"]);
+  });
+
+  it("un id que no está en la lista (ej. ya no activo) devuelve solo ese id, sin explotar", () => {
+    expect(Array.from(collectProjectSubtreeIds("no-existe", []))).toEqual(["no-existe"]);
+  });
+
+  it("no explota ante un ciclo corrupto (A→B→A)", () => {
+    const links: ProjectParentLink[] = [
+      { id: "a", parentProjectId: "b" },
+      { id: "b", parentProjectId: "a" },
+    ];
+    expect(Array.from(collectProjectSubtreeIds("a", links)).sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("wouldCreateProjectCycle", () => {
+  const links: ProjectParentLink[] = [
+    { id: "root", parentProjectId: null },
+    { id: "child", parentProjectId: "root" },
+    { id: "grandchild", parentProjectId: "child" },
+    { id: "other", parentProjectId: null },
+  ];
+
+  it("un proyecto no puede ser su propio padre", () => {
+    expect(wouldCreateProjectCycle("root", "root", links)).toBe(true);
+  });
+
+  it("un proyecto no puede tener como padre a su propio descendiente (ciclo indirecto)", () => {
+    expect(wouldCreateProjectCycle("root", "grandchild", links)).toBe(true);
+    expect(wouldCreateProjectCycle("child", "grandchild", links)).toBe(true);
+  });
+
+  it("reasignar a un proyecto no emparentado no genera ciclo", () => {
+    expect(wouldCreateProjectCycle("root", "other", links)).toBe(false);
+    expect(wouldCreateProjectCycle("grandchild", "other", links)).toBe(false);
+  });
+
+  it("un nieto puede seguir teniendo como padre a su padre real (no-op válido)", () => {
+    expect(wouldCreateProjectCycle("grandchild", "child", links)).toBe(false);
+  });
+
+  it("no explota ante un ciclo preexistente ajeno a la operación evaluada", () => {
+    const corrupted: ProjectParentLink[] = [
+      { id: "a", parentProjectId: "b" },
+      { id: "b", parentProjectId: "a" },
+    ];
+    expect(wouldCreateProjectCycle("other", "a", corrupted)).toBe(false);
   });
 });

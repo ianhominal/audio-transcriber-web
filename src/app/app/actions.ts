@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { validateProjectName } from "@/lib/format";
+import { collectProjectSubtreeIds } from "@/lib/drive/tree";
 
 /** Devuelve el usuario autenticado o corta con redirect a /login. */
 async function requireUser() {
@@ -91,12 +92,32 @@ export async function duplicateProject(id: string): Promise<ActionResult> {
 
 export async function deleteProject(id: string): Promise<ActionResult> {
   const { supabase } = await requireUser();
-  // Papelera (soft delete): las transcripciones quedan sin proyecto, no se borran.
-  await supabase.from("transcriptions").update({ project_id: null }).eq("project_id", id);
-  const { error } = await supabase
+
+  // Papelera (soft delete) en CASCADA: se propaga a todo el subárbol (hijos, nietos, ...) y a
+  // las transcripciones de cada uno de esos proyectos, de forma consistente — ya no quedan
+  // subproyectos huérfanos promovidos a raíz. Misma lógica pura que usa /api/sync/push
+  // (`collectProjectSubtreeIds` en src/lib/drive/tree.ts) para que web y desktop se comporten igual.
+  const { data: activeProjects, error: fetchError } = await supabase
     .from("projects")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id);
+    .select("id, parent_project_id")
+    .is("deleted_at", null);
+  if (fetchError) return { ok: false, error: "No se pudo borrar el proyecto." };
+
+  const subtreeIds = Array.from(
+    collectProjectSubtreeIds(
+      id,
+      (activeProjects ?? []).map((p) => ({ id: p.id, parentProjectId: p.parent_project_id }))
+    )
+  );
+
+  const now = new Date().toISOString();
+  const { error: transcriptionsError } = await supabase
+    .from("transcriptions")
+    .update({ deleted_at: now })
+    .in("project_id", subtreeIds);
+  if (transcriptionsError) return { ok: false, error: "No se pudo borrar el proyecto." };
+
+  const { error } = await supabase.from("projects").update({ deleted_at: now }).in("id", subtreeIds);
   if (error) return { ok: false, error: "No se pudo borrar el proyecto." };
 
   revalidatePath("/app");

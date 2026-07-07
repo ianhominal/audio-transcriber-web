@@ -50,6 +50,106 @@ export function buildProjectTree(projects: ProjectTreeInput[]): ProjectTreeNode[
 }
 
 // ---------------------------------------------------------------------------
+// A.1 Roll-up de conteos (sidebar): un padre muestra el total incluyendo descendientes
+// ---------------------------------------------------------------------------
+
+/**
+ * Dado el árbol ya armado (`buildProjectTree`) y los conteos DIRECTOS por proyecto (ej.
+ * transcripciones con `project_id = id`), devuelve un mapa id → total ACUMULADO (propio +
+ * el de todos sus descendientes). Los proyectos sin hijos quedan igual que su conteo directo.
+ * Puro y seguro ante ciclos: como `buildProjectTree` ya arma un árbol real (sin ciclos ni nodos
+ * repetidos), la recursión siempre termina.
+ */
+export function rollUpProjectCounts(
+  tree: ProjectTreeNode[],
+  directCounts: Record<string, number>
+): Record<string, number> {
+  const totals: Record<string, number> = {};
+
+  function visit(node: ProjectTreeNode): number {
+    let total = directCounts[node.id] ?? 0;
+    for (const child of node.children) {
+      total += visit(child);
+    }
+    totals[node.id] = total;
+    return total;
+  }
+
+  for (const root of tree) visit(root);
+  return totals;
+}
+
+// ---------------------------------------------------------------------------
+// A.2 Borrado en cascada: qué ids caen al soft-deletar un proyecto con hijos
+// ---------------------------------------------------------------------------
+
+export type ProjectParentLink = { id: string; parentProjectId: string | null };
+
+/**
+ * Dado el id de un proyecto a borrar y la lista PLANA de proyectos ACTIVOS del usuario
+ * (`deleted_at is null`, mismo criterio que `buildProjectTree`), devuelve el set de ids que
+ * caen en el borrado: el propio proyecto + TODO su subárbol (hijos, nietos, ...). Recorrido
+ * BFS puro, sin I/O — el caller es quien aplica el `update({ deleted_at })` sobre estos ids
+ * (proyectos y transcripciones).
+ *
+ * Defensivo: si `rootId` no está en `projects` (ej. ya no está activo), igual devuelve un set
+ * con `rootId` solo — el caller decide qué hacer (la query de borrado simplemente no afecta
+ * filas ya borradas). Anti-ciclo: un id nunca se agrega dos veces al set, así que un ciclo
+ * corrupto en la FK no produce loop infinito.
+ */
+export function collectProjectSubtreeIds(rootId: string, projects: ProjectParentLink[]): Set<string> {
+  const childrenByParent = new Map<string, string[]>();
+  for (const p of projects) {
+    if (!p.parentProjectId || p.parentProjectId === p.id) continue; // sin padre o auto-referencia corrupta
+    const siblings = childrenByParent.get(p.parentProjectId);
+    if (siblings) siblings.push(p.id);
+    else childrenByParent.set(p.parentProjectId, [p.id]);
+  }
+
+  const ids = new Set<string>([rootId]);
+  const queue: string[] = [rootId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const childId of childrenByParent.get(current) ?? []) {
+      if (ids.has(childId)) continue; // anti-ciclo/duplicado
+      ids.add(childId);
+      queue.push(childId);
+    }
+  }
+  return ids;
+}
+
+// ---------------------------------------------------------------------------
+// A.3 Anti-ciclo al reasignar padre (usado por /api/sync/push)
+// ---------------------------------------------------------------------------
+
+/**
+ * True si asignarle `newParentId` como padre a `projectId` crearía un ciclo (el proyecto
+ * terminaría siendo su propio ancestro, directa o indirectamente). Cubre el caso trivial
+ * (`newParentId === projectId`) y el indirecto (subir por la cadena de padres de `newParentId`
+ * hasta encontrar `projectId`). Puro; no confía en que `projects` esté libre de ciclos previos
+ * (si los hay, corta igual gracias al set de visitados, sin loop infinito).
+ */
+export function wouldCreateProjectCycle(
+  projectId: string,
+  newParentId: string,
+  projects: ProjectParentLink[]
+): boolean {
+  if (projectId === newParentId) return true;
+
+  const parentOf = new Map(projects.map((p) => [p.id, p.parentProjectId]));
+  const visited = new Set<string>();
+  let current: string | null = newParentId;
+  while (current) {
+    if (current === projectId) return true;
+    if (visited.has(current)) return false; // ciclo preexistente ajeno a esta operación
+    visited.add(current);
+    current = parentOf.get(current) ?? null;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // B. Planificador de importación recursiva (Drive → app)
 // ---------------------------------------------------------------------------
 
