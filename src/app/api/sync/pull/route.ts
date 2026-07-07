@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiUser } from "@/lib/supabase/api";
+import { AUDIO_BUCKET } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -41,9 +42,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No se pudo leer los cambios." }, { status: 500 });
   }
 
+  // Signed URL temporal por cada audio, para que el cliente desktop pueda descargarlo
+  // (el bucket es privado). Se generan en paralelo para no bloquear en serie.
+  const transcriptionsWithAudio = await Promise.all(
+    (transcriptions ?? []).map(async (t) => {
+      if (!t.audio_url) return { ...t, audio_url_signed: null };
+      const { data: signed } = await supabase.storage
+        .from(AUDIO_BUCKET)
+        .createSignedUrl(t.audio_url, 60 * 60);
+      return { ...t, audio_url_signed: signed?.signedUrl ?? null };
+    })
+  );
+
   return NextResponse.json({
     serverTime,
     projects: projects ?? [],
-    transcriptions: transcriptions ?? [],
+    transcriptions: transcriptionsWithAudio,
   });
 }
