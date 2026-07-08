@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
 import { requestGoogleDriveAccessToken, uploadMarkdownToDrive, DriveAuthError } from "@/lib/googleDrive";
@@ -10,10 +11,13 @@ import {
   deleteTranscription,
 } from "../../actions";
 import { EmojiPicker } from "../../emoji-picker";
-import { Button } from "@/components/ui/Button";
+import { Button, buttonClasses } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
+import { useViewportClamp } from "@/hooks/useViewportClamp";
+
+const EXPORT_MENU_WIDTH = 256; // w-64
 
 type Transcription = {
   id: string;
@@ -62,15 +66,34 @@ export function TranscriptionDetail({
   const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
+  // Menú "Exportar": portal a `document.body` + clampeo al viewport (mismo patrón que `IconMenu`,
+  // extraído a `useViewportClamp`) — antes era `absolute left-0 w-64` sin clamp, así que en
+  // pantallas angostas (~360-390px) se salía por el borde derecho.
+  const {
+    coords: exportCoords,
+    triggerRef: exportTriggerRef,
+    panelRef: exportPanelRef,
+  } = useViewportClamp(exportOpen, EXPORT_MENU_WIDTH, { align: "left" });
 
   useEffect(() => {
+    if (!exportOpen) return;
     function onDoc(e: MouseEvent) {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);
+      const target = e.target as Node;
+      if (exportTriggerRef.current?.contains(target) || exportPanelRef.current?.contains(target)) return;
+      setExportOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setExportOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+    // Los refs son estables entre renders — no hace falta re-suscribir salvo que cambie `exportOpen`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportOpen]);
 
   const projectName = projects.find((p) => p.id === projectId)?.name ?? null;
 
@@ -209,10 +232,10 @@ export function TranscriptionDetail({
               aria-label="Título de la transcripción"
               className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold tracking-tight text-slate-900 outline-none hover:border-slate-200 focus:border-brand-400 focus:bg-white"
             />
-            <p className="mt-0.5 px-0.5 text-xs text-slate-400">🎵 {transcription.audio_name}</p>
+            <p className="mt-0.5 px-0.5 text-xs text-slate-500">🎵 {transcription.audio_name}</p>
           </div>
         </div>
-        <span className="shrink-0 pt-2 text-xs text-slate-400">{formatDate(transcription.created_at)}</span>
+        <span className="shrink-0 pt-2 text-xs text-slate-500">{formatDate(transcription.created_at)}</span>
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -235,7 +258,7 @@ export function TranscriptionDetail({
       {audioSrc ? (
         <audio controls src={audioSrc} className="mt-4 w-full" />
       ) : (
-        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           🎧 El audio de esta transcripción todavía no está guardado.
         </p>
       )}
@@ -285,34 +308,52 @@ export function TranscriptionDetail({
             Descargar audio
           </Button>
         )}
-        <div ref={exportRef} className="relative">
-          <Button
-            variant="secondary"
+        <div className="relative">
+          <button
+            ref={exportTriggerRef}
+            type="button"
             onClick={() => setExportOpen((o) => !o)}
             aria-haspopup="menu"
             aria-expanded={exportOpen}
+            className={buttonClasses({ variant: "secondary" })}
           >
             Exportar ▾
-          </Button>
-          {exportOpen && (
-            <div role="menu" className="absolute left-0 z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
-              <button
-                role="menuitem"
-                onClick={exportMarkdown}
-                className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+          </button>
+          {exportOpen &&
+            createPortal(
+              <div
+                ref={exportPanelRef}
+                role="menu"
+                style={{
+                  position: "fixed",
+                  top: exportCoords?.top ?? -9999,
+                  left: exportCoords?.left ?? -9999,
+                  width: EXPORT_MENU_WIDTH,
+                  visibility: exportCoords ? "visible" : "hidden",
+                }}
+                // z-50: mismo nivel que IconMenu/EmojiPicker (ver jerarquía en
+                // `components/ui/Modal.tsx`), para mantener una escala de z-index coherente entre
+                // todos los popovers porteados de la app.
+                className="z-50 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg"
               >
-                📝 Obsidian / Markdown (.md)
-              </button>
-              <button
-                role="menuitem"
-                onClick={exportDrive}
-                disabled={exportingDrive}
-                className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
-              >
-                {exportingDrive ? <Spinner size="xs" /> : "📤"} {exportingDrive ? "Exportando…" : "Google Drive"}
-              </button>
-            </div>
-          )}
+                <button
+                  role="menuitem"
+                  onClick={exportMarkdown}
+                  className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+                >
+                  📝 Obsidian / Markdown (.md)
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportDrive}
+                  disabled={exportingDrive}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {exportingDrive ? <Spinner size="xs" /> : "📤"} {exportingDrive ? "Exportando…" : "Google Drive"}
+                </button>
+              </div>,
+              document.body
+            )}
         </div>
         <Button variant="danger-outline" onClick={remove} className="ml-auto">
           Borrar

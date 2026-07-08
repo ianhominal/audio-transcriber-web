@@ -74,9 +74,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             </span>
             <span className="min-w-0 flex-1">{t.message}</span>
             <button
+              type="button"
               onClick={() => dismiss(t.id)}
               aria-label="Cerrar aviso"
-              className="shrink-0 text-current opacity-60 hover:opacity-100"
+              className="tap-target -my-2 -mr-2 flex shrink-0 items-center justify-center rounded text-current opacity-60 transition hover:opacity-100"
             >
               ✕
             </button>

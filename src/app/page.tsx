@@ -42,7 +42,7 @@ export default async function Landing() {
             {cta}
           </Link>
         </div>
-        <p className="mt-4 text-sm text-slate-400">Gratis para empezar · sin tarjeta</p>
+        <p className="mt-4 text-sm text-slate-500">Gratis para empezar · sin tarjeta</p>
       </section>
 
       <section className="mx-auto grid max-w-4xl gap-4 px-4 pb-20 sm:grid-cols-3 sm:px-5">

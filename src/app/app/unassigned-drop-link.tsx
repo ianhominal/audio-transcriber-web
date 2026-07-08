@@ -60,7 +60,7 @@ export function UnassignedProjectLink({ active, count }: { active: boolean; coun
     >
       <span className="text-base leading-none">📄</span>
       <span className="min-w-0 flex-1 truncate">Sin proyecto</span>
-      <span className="shrink-0 text-xs tabular-nums text-slate-400">{count}</span>
+      <span className="shrink-0 text-xs tabular-nums text-slate-500">{count}</span>
     </Link>
   );
 }

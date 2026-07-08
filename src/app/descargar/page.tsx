@@ -42,7 +42,7 @@ export default async function DescargarPage() {
           >
             ⬇ Descargar para Windows
           </a>
-          <p className="mt-3 text-sm text-slate-400">Windows 10/11 · 64 bits · se actualiza sola</p>
+          <p className="mt-3 text-sm text-slate-500">Windows 10/11 · 64 bits · se actualiza sola</p>
         </div>
       </section>
 

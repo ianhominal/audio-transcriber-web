@@ -201,13 +201,13 @@ export function DriveFolderConnect() {
               {summary.imported.projects} subcarpeta(s) y {summary.imported.transcriptions} nota(s) importadas.
             </li>
             {(summary.skipped.existingFolders > 0 || summary.skipped.existingFiles > 0) && (
-              <li className="text-slate-400">
+              <li className="text-slate-500">
                 {summary.skipped.existingFolders} carpeta(s) y {summary.skipped.existingFiles} nota(s) ya estaban
                 importadas — no se duplicaron.
               </li>
             )}
             {summary.skipped.otherFiles > 0 && (
-              <li className="text-slate-400">
+              <li className="text-slate-500">
                 {summary.skipped.otherFiles} archivo(s) que no son carpeta ni .md se ignoraron.
               </li>
             )}
@@ -247,11 +247,11 @@ export function DriveFolderConnect() {
 
           <div className="mt-2 max-h-64 min-h-[6rem] overflow-y-auto rounded-lg border border-slate-200">
             {loading ? (
-              <p className="flex items-center justify-center gap-2 p-4 text-sm text-slate-400">
+              <p className="flex items-center justify-center gap-2 p-4 text-sm text-slate-500">
                 <Spinner size="xs" /> Cargando…
               </p>
             ) : folders.length === 0 ? (
-              <p className="p-4 text-center text-sm text-slate-400">Sin subcarpetas acá.</p>
+              <p className="p-4 text-center text-sm text-slate-500">Sin subcarpetas acá.</p>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {folders.map((f) => (
@@ -310,7 +310,7 @@ export function DriveFolderConnect() {
           </div>
 
           {canConnect ? (
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-slate-500">
               Se importa &quot;{current.name}&quot; con toda su jerarquía de subcarpetas y notas .md.
             </p>
           ) : (

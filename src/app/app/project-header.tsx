@@ -109,7 +109,7 @@ export function ProjectHeader({
             )}
           </button>
         )}
-        <span className="shrink-0 pt-1.5 text-xs text-slate-400">Creado el {formatDate(project.createdAt)}</span>
+        <span className="shrink-0 pt-1.5 text-xs text-slate-500">Creado el {formatDate(project.createdAt)}</span>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-slate-500">
@@ -155,7 +155,7 @@ export function ProjectHeader({
             onClick={() => setEditingDesc(true)}
             className="w-full rounded-lg px-1 py-1 text-left text-sm text-slate-600 transition hover:bg-slate-50"
           >
-            {project.description || <span className="text-slate-400">+ Agregar contexto o descripción…</span>}
+            {project.description || <span className="text-slate-500">+ Agregar contexto o descripción…</span>}
           </button>
         )}
       </div>

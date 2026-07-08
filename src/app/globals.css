@@ -27,6 +27,15 @@
    rounded-lg (controles: botones, inputs, filas) · rounded-xl (popovers/menús)
    · rounded-2xl (paneles, tarjetas, modales). */
 
+/* Área táctil mínima de 44×44px (WCAG 2.5.5) para botones-ícono chicos que antes dependían solo
+   del tamaño del glyph — combinar con `flex items-center justify-center` para centrar el
+   contenido visual dentro. Usado en `IconMenu`, el chevron de `ProjectRow`, el "✕" de la cola de
+   `TranscribeWorkspace` y el cierre de `Toast`, en vez de repetir `min-h-11 min-w-11` en cada uno. */
+@utility tap-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -59,4 +68,47 @@ body {
 
 .animate-toast-in {
   animation: toast-in 0.18s ease-out;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-drawer-in {
+  animation: drawer-in 0.2s ease-out;
+}
+
+/* Bottom-sheet del `Modal` en mobile (ver `components/ui/Modal.tsx`): sube desde abajo del
+   viewport. En `sm+` el mismo componente vuelve a ser el dialog centrado de siempre y esta
+   animación no se aplica. */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-sheet-up {
+  animation: sheet-up 0.2s ease-out;
+}
+
+/* El cursor "mano" (`cursor-grab`/`active:cursor-grabbing`) de `transcription-row.tsx` es el
+   affordance del drag & drop HTML5 nativo, que no existe en touch (`pointer: coarse`) — ahí solo
+   engaña, porque el mecanismo real para mover una transcripción en mobile es el menú "..." →
+   "Mover a" (ver `IconMenu` en esa misma fila), que sigue funcionando igual. Puramente cosmético:
+   no toca `draggable`/`onDragStart` ni ningún otro comportamiento. */
+@media (pointer: coarse) {
+  .cursor-grab {
+    cursor: default;
+  }
+  .active\:cursor-grabbing:active {
+    cursor: default;
+  }
 }

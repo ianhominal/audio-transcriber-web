@@ -16,6 +16,11 @@ import {
 
 type Project = { id: string; name: string; icon: string; syncOrigin?: string };
 
+// Tope de indentación visual: a partir de esta profundidad, los niveles siguientes ya no suman
+// más `padding-left` — un árbol muy anidado en mobile (~360px) podía comerse todo el ancho
+// disponible y dejar la fila sin espacio para el nombre/conteo/menú.
+const MAX_INDENT_DEPTH = 4;
+
 export function ProjectRow({
   project,
   count,
@@ -102,7 +107,7 @@ export function ProjectRow({
   if (editing) {
     return (
       <div
-        style={{ paddingLeft: depth * 16 }}
+        style={{ paddingLeft: Math.min(depth, MAX_INDENT_DEPTH) * 16 }}
         className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-1.5 py-1.5"
       >
         <EmojiPicker value={icon} onChange={setIcon} />
@@ -135,7 +140,7 @@ export function ProjectRow({
     >
       <Link
         href={`/app?project=${project.id}`}
-        style={{ paddingLeft: 10 + depth * 16 }}
+        style={{ paddingLeft: 10 + Math.min(depth, MAX_INDENT_DEPTH) * 16 }}
         className={`flex min-w-0 flex-1 items-center gap-2 py-2 pr-2.5 text-sm ${
           active ? "font-semibold text-brand-700" : "text-slate-700"
         }`}
@@ -149,7 +154,10 @@ export function ProjectRow({
               onToggleExpand?.();
             }}
             aria-label={expanded ? `Colapsar ${project.name}` : `Expandir ${project.name}`}
-            className="shrink-0 rounded text-slate-400 hover:text-slate-600"
+            // Hit-slop: el glyph queda visualmente chico (no se agranda el ícono, que rompería la
+            // densidad de la lista), pero el área táctil real llega a 44px vía margen negativo —
+            // mismo criterio que pide el ítem de touch targets sin inflar el layout.
+            className="tap-target -m-3 flex shrink-0 items-center justify-center rounded text-slate-400 hover:text-slate-600"
           >
             {expanded ? "▾" : "▸"}
           </button>
@@ -163,7 +171,7 @@ export function ProjectRow({
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
-        <span className="shrink-0 text-xs tabular-nums text-slate-400">{count}</span>
+        <span className="shrink-0 text-xs tabular-nums text-slate-500">{count}</span>
       </Link>
       <IconMenu label={`Opciones de ${project.name}`}>
         {(close) => (

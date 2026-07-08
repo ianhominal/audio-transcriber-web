@@ -104,10 +104,13 @@ export function SubfolderCard({
               </span>
             )}
           </span>
-          <span className="block truncate text-xs text-slate-400">{metaParts.join(" · ")}</span>
+          <span className="block truncate text-xs text-slate-500">{metaParts.join(" · ")}</span>
         </span>
       </Link>
-      <div className="opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+      {/* En touch no hay `:hover`, así que `opacity-0 group-hover:opacity-100` dejaba el menú
+          inalcanzable en mobile (nunca se disparaba). Abajo de `md` queda siempre visible; de
+          `md` para arriba (mouse/trackpad) se mantiene el comportamiento original de hover. */}
+      <div className="opacity-100 transition md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
         <IconMenu label={`Opciones de ${folder.name}`}>
           {(close) => (
             <>

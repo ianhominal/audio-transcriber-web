@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ToastProvider } from "@/components/ui/Toast";
+import { InstallPrompt } from "@/components/install-prompt";
 import LogoutButton from "./logout-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -39,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               >
                 Ajustes
               </Link>
-              <span className="hidden truncate text-sm text-slate-400 md:inline md:max-w-[12rem]" title={user.email}>
+              <span className="hidden truncate text-sm text-slate-500 md:inline md:max-w-[12rem]" title={user.email}>
                 {user.email}
               </span>
               <LogoutButton />
@@ -48,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </header>
         {children}
       </div>
+      <InstallPrompt />
     </ToastProvider>
   );
 }

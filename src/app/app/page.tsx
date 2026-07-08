@@ -10,6 +10,7 @@ import {
   markSchemaCompatResult,
   shouldRedetectSchemaCompat,
 } from "@/lib/supabase/schema-compat";
+import { DashboardShell } from "./dashboard-shell";
 import { NewProjectButton } from "./new-project-button";
 import { NewSubfolderButton } from "./new-subfolder-button";
 import { ProjectHeader } from "./project-header";
@@ -155,24 +156,33 @@ export default async function Dashboard({
 
   return (
     <div className="mx-auto max-w-6xl gap-6 px-4 py-6 sm:px-6 sm:py-8 md:grid md:grid-cols-[16rem_1fr] md:items-start">
-      {/* Sidebar de proyectos */}
-      <aside className="mb-6 space-y-3 md:sticky md:top-20 md:mb-0">
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="mb-2 px-1.5 pt-0.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Proyectos
-          </p>
-          <nav className="max-h-[65vh] min-h-[10rem] space-y-0.5 overflow-y-auto pr-0.5">
-            <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
-            <ProjectTree
-              projects={projectsFull}
-              counts={countsByProjectId}
-              activeProjectId={filter && filter !== "none" ? filter : null}
-            />
-            <UnassignedProjectLink active={filter === "none"} count={noneCount} />
-          </nav>
-        </div>
-        <NewProjectButton />
-      </aside>
+      {/* Sidebar de proyectos: en desktop queda fija en el grid (sin cambios); en mobile se
+          convierte en un drawer off-canvas — ver `DashboardShell` (`dashboard-shell.tsx`). */}
+      <DashboardShell
+        sidebar={
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="mb-2 px-1.5 pt-0.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Proyectos
+              </p>
+              {/* El `max-h`/`overflow-y-auto` solo tiene sentido en desktop, donde el sidebar es
+                  `sticky` y necesita un tope para no desbordar el viewport. En el drawer mobile ya
+                  scrollea el panel completo (`DashboardShell`) — un segundo scroll anidado ahí
+                  sería justo la mala UX que este cambio busca sacar. */}
+              <nav className="min-h-[10rem] space-y-0.5 md:max-h-[65vh] md:overflow-y-auto md:pr-0.5">
+                <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
+                <ProjectTree
+                  projects={projectsFull}
+                  counts={countsByProjectId}
+                  activeProjectId={filter && filter !== "none" ? filter : null}
+                />
+                <UnassignedProjectLink active={filter === "none"} count={noneCount} />
+              </nav>
+            </div>
+            <NewProjectButton />
+          </div>
+        }
+      />
 
       {/* Panel principal: explorador jerárquico (proyecto/carpeta seleccionado) o lista plana
           ("Todas" / "Sin proyecto", comportamiento sin cambios). */}
@@ -331,7 +341,7 @@ function SidebarLink({
     >
       <span className="text-base leading-none">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="shrink-0 text-xs tabular-nums text-slate-400">{count}</span>
+      <span className="shrink-0 text-xs tabular-nums text-slate-500">{count}</span>
     </Link>
   );
 }

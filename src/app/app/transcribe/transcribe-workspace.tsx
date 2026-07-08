@@ -538,7 +538,7 @@ export function TranscribeWorkspace({
         )}
       </div>
       {capturing && (
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 text-xs text-slate-500">
           Recordá tildar &quot;Compartir audio de la pestaña&quot; en el diálogo del navegador (ej. con Google Meet
           abierto en otra pestaña).
         </p>
@@ -597,7 +597,7 @@ export function TranscribeWorkspace({
                 ) : (
                   <p className="truncate text-sm font-medium text-slate-800">{it.title}</p>
                 )}
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-500">
                   {formatFileSize(it.file.size)}
                   {it.status === "duplicate" && " · ya estaba guardado"}
                   {it.status === "error" && ` · ${it.error}`}
@@ -610,8 +610,9 @@ export function TranscribeWorkspace({
               )}
               {it.status === "pending" && !running && editingKey !== it.key && (
                 <button
+                  type="button"
                   onClick={() => removeItem(it.key)}
-                  className="rounded p-0.5 text-slate-300 transition hover:text-red-500"
+                  className="tap-target flex shrink-0 items-center justify-center rounded text-slate-300 transition hover:text-red-500"
                   aria-label={`Quitar ${it.title} de la cola`}
                 >
                   ✕
