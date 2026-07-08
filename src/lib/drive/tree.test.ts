@@ -7,6 +7,8 @@ import {
   wouldCreateProjectCycle,
   planProjectDeletion,
   isProjectDeletionAuthorized,
+  getSubfolders,
+  buildProjectBreadcrumb,
   type ProjectTreeInput,
   type DriveTreeNode,
   type ProjectParentLink,
@@ -64,6 +66,73 @@ describe("buildProjectTree", () => {
     ];
     const tree = buildProjectTree(projects);
     expect(tree).toEqual([]);
+  });
+});
+
+describe("getSubfolders", () => {
+  const projects: ProjectTreeInput[] = [
+    { id: "root", name: "Reuniones", icon: "", parentProjectId: null, syncOrigin: "drive" },
+    { id: "child1", name: "Semana 1", icon: "", parentProjectId: "root", syncOrigin: "drive" },
+    { id: "child2", name: "Semana 2", icon: "", parentProjectId: "root", syncOrigin: "drive" },
+    { id: "grandchild", name: "Lunes", icon: "", parentProjectId: "child1", syncOrigin: "drive" },
+    { id: "normal", name: "Personal", icon: "📁", parentProjectId: null, syncOrigin: "local" },
+  ];
+
+  it("devuelve solo los hijos DIRECTOS de una carpeta, en orden", () => {
+    expect(getSubfolders("root", projects).map((p) => p.id)).toEqual(["child1", "child2"]);
+  });
+
+  it("no incluye nietos ni hermanos", () => {
+    const result = getSubfolders("child1", projects);
+    expect(result.map((p) => p.id)).toEqual(["grandchild"]);
+  });
+
+  it("una hoja sin subcarpetas devuelve []", () => {
+    expect(getSubfolders("grandchild", projects)).toEqual([]);
+    expect(getSubfolders("normal", projects)).toEqual([]);
+  });
+
+  it("un id inexistente devuelve [] sin lanzar", () => {
+    expect(getSubfolders("no-existe", projects)).toEqual([]);
+  });
+});
+
+describe("buildProjectBreadcrumb", () => {
+  const projects: ProjectTreeInput[] = [
+    { id: "root", name: "Reuniones", icon: "🗂️", parentProjectId: null, syncOrigin: "drive" },
+    { id: "child", name: "Semana 1", icon: "📁", parentProjectId: "root", syncOrigin: "drive" },
+    { id: "grandchild", name: "Lunes", icon: "📄", parentProjectId: "child", syncOrigin: "drive" },
+    { id: "normal", name: "Personal", icon: "📁", parentProjectId: null, syncOrigin: "local" },
+  ];
+
+  it("un proyecto raíz devuelve un breadcrumb de un solo elemento (él mismo)", () => {
+    expect(buildProjectBreadcrumb("root", projects).map((p) => p.id)).toEqual(["root"]);
+    expect(buildProjectBreadcrumb("normal", projects).map((p) => p.id)).toEqual(["normal"]);
+  });
+
+  it("un nieto devuelve la cadena completa raíz → hijo → nieto, en ese orden", () => {
+    expect(buildProjectBreadcrumb("grandchild", projects).map((p) => p.id)).toEqual(["root", "child", "grandchild"]);
+  });
+
+  it("devuelve los objetos completos (no solo ids), útil para renderizar name/icon", () => {
+    const chain = buildProjectBreadcrumb("child", projects);
+    expect(chain).toEqual([
+      { id: "root", name: "Reuniones", icon: "🗂️", parentProjectId: null, syncOrigin: "drive" },
+      { id: "child", name: "Semana 1", icon: "📁", parentProjectId: "root", syncOrigin: "drive" },
+    ]);
+  });
+
+  it("un id que no está en la lista devuelve []", () => {
+    expect(buildProjectBreadcrumb("no-existe", projects)).toEqual([]);
+  });
+
+  it("no explota ante un ciclo corrupto (A→B→A): corta al revisitar", () => {
+    const cyclic: ProjectTreeInput[] = [
+      { id: "a", name: "A", icon: "", parentProjectId: "b", syncOrigin: "drive" },
+      { id: "b", name: "B", icon: "", parentProjectId: "a", syncOrigin: "drive" },
+    ];
+    const chain = buildProjectBreadcrumb("a", cyclic);
+    expect(chain.map((p) => p.id)).toEqual(["b", "a"]);
   });
 });
 

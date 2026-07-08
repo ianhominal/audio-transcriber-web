@@ -80,6 +80,7 @@ export async function createProject(formData: FormData): Promise<CreateProjectRe
 
   const { supabase, user } = await requireUser();
   const icon = String(formData.get("icon") ?? "").slice(0, 8);
+  const description = String(formData.get("description") ?? "").slice(0, 2000);
 
   const { data, error } = await supabase
     .from("projects")
@@ -88,6 +89,7 @@ export async function createProject(formData: FormData): Promise<CreateProjectRe
       name: parsed.value,
       title: parsed.value,
       icon,
+      description,
     })
     .select("id")
     .single();
@@ -95,6 +97,67 @@ export async function createProject(formData: FormData): Promise<CreateProjectRe
 
   revalidatePath("/app");
   return { ok: true, id: data.id };
+}
+
+/**
+ * Crea una SUBcarpeta (proyecto con `parent_project_id`) dentro del explorador jerárquico (doc
+ * 10 + explorador). Reusa `validateProjectName` (misma regla que un proyecto raíz). Si la
+ * migración `20260707130000_drive_sync_v2_foundation.sql` todavía no está aplicada en producción
+ * (columna `parent_project_id` inexistente), degrada con un mensaje claro en vez de romper — el
+ * insert simplemente falla con `42703` y lo traducimos a un error entendible por el usuario (ver
+ * `isMissingColumnError` en `schema-compat.ts`).
+ */
+export async function createSubproject(
+  parentId: string,
+  name: string,
+  description?: string,
+  icon?: string
+): Promise<CreateProjectResult> {
+  const parsed = validateProjectName(name);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  const { supabase, user } = await requireUser();
+
+  const { data, error } = await supabase
+    .from("projects")
+    .insert({
+      user_id: user.id,
+      name: parsed.value,
+      title: parsed.value,
+      icon: (icon ?? "📁").slice(0, 8),
+      description: (description ?? "").slice(0, 2000),
+      parent_project_id: parentId,
+      sync_origin: "local",
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    if (isMissingColumnError(error)) {
+      return {
+        ok: false,
+        error: "Las subcarpetas todavía no están disponibles: falta aplicar una actualización pendiente de la base de datos.",
+      };
+    }
+    return { ok: false, error: "No se pudo crear la subcarpeta." };
+  }
+  if (!data) return { ok: false, error: "No se pudo crear la subcarpeta." };
+
+  revalidatePath("/app");
+  return { ok: true, id: data.id };
+}
+
+/** Guarda el contexto/descripción del proyecto (columna `description`, existe desde el esquema inicial). */
+export async function updateProjectDescription(id: string, description: string): Promise<ActionResult> {
+  const { supabase } = await requireUser();
+  const { error } = await supabase
+    .from("projects")
+    .update({ description: description.slice(0, 2000), updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { ok: false, error: "No se pudo guardar el contexto." };
+
+  revalidatePath("/app");
+  return { ok: true };
 }
 
 export async function renameProject(

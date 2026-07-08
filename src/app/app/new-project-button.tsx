@@ -31,6 +31,8 @@ export function NewProjectButton() {
     toast("Proyecto creado.", "success");
   }
 
+  const descriptionId = "new-project-description";
+
   if (!open) {
     return (
       <button
@@ -58,6 +60,14 @@ export function NewProjectButton() {
           aria-label="Nombre del proyecto"
         />
       </div>
+      <textarea
+        name="description"
+        id={descriptionId}
+        rows={2}
+        placeholder="Contexto o descripción (opcional)…"
+        aria-label="Contexto o descripción del proyecto"
+        className="w-full resize-y rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+      />
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex gap-2">
         <Button type="submit" size="sm" loading={pending} className="flex-1">

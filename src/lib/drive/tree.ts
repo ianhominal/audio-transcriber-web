@@ -200,6 +200,46 @@ export function wouldCreateProjectCycle(
 }
 
 // ---------------------------------------------------------------------------
+// A.5 Explorador jerárquico: contenido de una carpeta + breadcrumb
+// ---------------------------------------------------------------------------
+
+/**
+ * Devuelve los subproyectos (subcarpetas) DIRECTOS de `folderId` a partir de la lista plana de
+ * proyectos — mismo criterio de pertenencia que `buildProjectTree`, pero sin armar el árbol
+ * completo (alcanza con un nivel para pintar el panel del explorador). Puro y genérico: sirve
+ * tanto para la lista liviana del sidebar como para la lista completa (con `description`,
+ * `createdAt`, etc.) que arma el panel principal.
+ */
+export function getSubfolders<T extends { parentProjectId: string | null }>(folderId: string, projects: T[]): T[] {
+  return projects.filter((p) => p.parentProjectId === folderId);
+}
+
+/**
+ * Arma el breadcrumb de un proyecto (raíz → ... → actual) siguiendo la cadena de
+ * `parentProjectId` hacia arriba. Puro y genérico: devuelve los objetos originales, en orden,
+ * así el caller decide qué campos renderizar (id/name/icon, etc.).
+ *
+ * Defensivo, mismo criterio que el resto del módulo: si `projectId` no está en `projects` (ej.
+ * fue borrado o pertenece a otro usuario) devuelve `[]` en vez de lanzar; ante un ciclo corrupto
+ * en la cadena de padres, corta al revisitar un id ya visto (no hay loop infinito).
+ */
+export function buildProjectBreadcrumb<T extends { id: string; parentProjectId: string | null }>(
+  projectId: string,
+  projects: T[]
+): T[] {
+  const byId = new Map(projects.map((p) => [p.id, p]));
+  const chain: T[] = [];
+  const visited = new Set<string>();
+  let current = byId.get(projectId);
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    chain.push(current);
+    current = current.parentProjectId ? byId.get(current.parentProjectId) : undefined;
+  }
+  return chain.reverse();
+}
+
+// ---------------------------------------------------------------------------
 // B. Planificador de importación recursiva (Drive → app)
 // ---------------------------------------------------------------------------
 
