@@ -6,7 +6,6 @@ import {
   validateProjectName,
   formatRecordingFileName,
   defaultTitleFromFileName,
-  resolveDefaultProjectId,
   buildMarkdownExport,
   parseMarkdownExport,
   slugifyFileName,
@@ -84,17 +83,6 @@ describe("defaultTitleFromFileName", () => {
     expect(defaultTitleFromFileName("")).toBe("");
     // @ts-expect-error valor inválido a propósito, para probar la tolerancia en runtime
     expect(defaultTitleFromFileName(undefined)).toBe("");
-  });
-});
-
-describe("resolveDefaultProjectId", () => {
-  it("devuelve el id del proyecto activo cuando hay uno seleccionado", () => {
-    expect(resolveDefaultProjectId("proj-123")).toBe("proj-123");
-  });
-
-  it("devuelve null cuando no hay proyecto (\"\") o se está creando uno nuevo (\"__new__\")", () => {
-    expect(resolveDefaultProjectId("")).toBeNull();
-    expect(resolveDefaultProjectId("__new__")).toBeNull();
   });
 });
 

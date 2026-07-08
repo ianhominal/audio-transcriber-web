@@ -10,10 +10,8 @@ import {
   formatDuration,
   formatRecordingFileName,
   defaultTitleFromFileName,
-  resolveDefaultProjectId,
 } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 
@@ -53,11 +51,10 @@ type Item = {
   status: Status;
   resultId?: string;
   error?: string;
-  // Título y proyecto elegidos en el modal "Guardar grabación" (mic/captura). `undefined` en
-  // `projectId` significa "no vino del modal": el ítem usa el proyecto destino global (mismo
-  // comportamiento que un archivo subido a mano). `null` es "Sin proyecto" elegido a propósito.
+  // Título automático de las grabaciones (mic/captura), ej. "Grabacion-1720368000000". El
+  // usuario puede renombrarlo después en el detalle de la transcripción. Los archivos subidos a
+  // mano no traen `title`: se muestra `file.name` (ver JSX de la cola más abajo).
   title?: string;
-  projectId?: string | null;
 };
 
 let counter = 0;
@@ -95,44 +92,16 @@ export function TranscribeWorkspace({
   const runningRef = useRef(false); // guard SÍNCRONO contra doble-submit
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // `destino` leído desde los callbacks de grabación (`onstop`, definidos dentro de un
-  // `useCallback` con deps `[]`/estables): sin el ref quedarían con el valor de `destino` del
-  // render en que arrancó la grabación, ignorando cambios posteriores del selector.
-  const destinoRef = useRef(destino);
-  useEffect(() => {
-    destinoRef.current = destino;
-  }, [destino]);
-
-  // --- Modal "Guardar grabación" (título + proyecto), al terminar de grabar/capturar ---
-  const [pendingRecording, setPendingRecording] = useState<File | null>(null);
-  const [recordingTitle, setRecordingTitle] = useState("");
-  const [recordingProject, setRecordingProject] = useState(""); // "" = Sin proyecto
-
-  function openRecordingModal(file: File) {
-    setPendingRecording(file);
-    setRecordingTitle(defaultTitleFromFileName(file.name));
-    setRecordingProject(resolveDefaultProjectId(destinoRef.current) ?? "");
-  }
-
-  function discardRecording() {
-    setPendingRecording(null);
-  }
-
-  function confirmRecording() {
-    if (!pendingRecording) return;
-    const title = recordingTitle.trim();
-    setItems((prev) => [
-      ...prev,
-      {
-        key: nextKey(),
-        file: pendingRecording,
-        status: "pending" as Status,
-        title: title || undefined,
-        projectId: recordingProject || null,
-      },
-    ]);
-    toast(`"${title || pendingRecording.name}" agregada a la cola.`, "success");
-    setPendingRecording(null);
+  // Al terminar de grabar (mic o captura de reunión) la grabación se encola DIRECTO, igual que
+  // un archivo subido a mano: usa el "Proyecto destino" ya elegido arriba (se resuelve recién en
+  // `run()`, como cualquier ítem) y un título automático que el usuario puede renombrar después
+  // desde el detalle de la transcripción. Antes existía un modal "Guardar grabación" que volvía a
+  // preguntar el proyecto (redundante) y descartaba la grabación si se cerraba con click afuera/
+  // Escape (pérdida de datos) — se eliminó.
+  function enqueueRecording(file: File) {
+    const title = defaultTitleFromFileName(file.name);
+    setItems((prev) => [...prev, { key: nextKey(), file, status: "pending" as Status, title }]);
+    toast(`"${title}" agregada a la cola.`, "success");
   }
 
   // --- Grabar desde el micrófono ---
@@ -194,7 +163,7 @@ export function TranscribeWorkspace({
         const file = new File([blob], formatRecordingFileName("Grabacion", Date.now(), ext), {
           type: usedType,
         });
-        openRecordingModal(file);
+        enqueueRecording(file);
         stream.getTracks().forEach((t) => t.stop());
       };
       recorder.start();
@@ -253,7 +222,7 @@ export function TranscribeWorkspace({
         const file = new File([blob], formatRecordingFileName("Reunion", Date.now(), ext), {
           type: usedType,
         });
-        openRecordingModal(file);
+        enqueueRecording(file);
         displayStream.getTracks().forEach((t) => t.stop());
       };
       // Si el usuario corta el compartir desde el propio navegador, cerramos la grabación prolijamente.
@@ -348,11 +317,9 @@ export function TranscribeWorkspace({
         form.append("file", item.file);
         form.append("language", language);
         form.append("model", model);
-        // Un ítem que vino del modal "Guardar grabación" trae su propio proyecto (incluso
-        // "Sin proyecto" = null a propósito); si no, hereda el proyecto destino del lote, igual
-        // que un archivo subido a mano.
-        const itemProjectId = item.projectId !== undefined ? item.projectId : projectId;
-        if (itemProjectId) form.append("projectId", itemProjectId);
+        // Toda la cola (archivos subidos y grabaciones) hereda el mismo proyecto destino del
+        // lote, elegido en el selector de arriba.
+        if (projectId) form.append("projectId", projectId);
         if (item.title) form.append("title", item.title);
 
         const resp = await fetch("/api/transcribe", { method: "POST", body: form });
@@ -507,7 +474,7 @@ export function TranscribeWorkspace({
             type="button"
             variant="secondary"
             onClick={startMicRecording}
-            disabled={capturing || !!pendingRecording}
+            disabled={capturing}
           >
             🎙️ Grabar
           </Button>
@@ -523,7 +490,7 @@ export function TranscribeWorkspace({
             type="button"
             variant="secondary"
             onClick={startMeetingCapture}
-            disabled={recording || !!pendingRecording}
+            disabled={recording}
           >
             🖥️ Capturar reunión
           </Button>
@@ -543,62 +510,6 @@ export function TranscribeWorkspace({
       {recordError && <p className="mt-2 text-sm text-red-600">{recordError}</p>}
       {captureError && <p className="mt-2 text-sm text-red-600">{captureError}</p>}
 
-      {/* Modal "Guardar grabación": título + proyecto, al terminar de grabar/capturar (mismo
-          selector de proyecto — misma lista `projects` + opción "Sin proyecto" — que "Proyecto
-          destino" más arriba). Bajo fricción: título y proyecto ya vienen prellenados, un clic en
-          "Agregar a la cola" alcanza para aceptar los valores por defecto. */}
-      {pendingRecording && (
-        <Modal onClose={discardRecording} labelledBy="recording-modal-title">
-          <h2 id="recording-modal-title" className="text-lg font-semibold text-slate-900">
-            Guardar grabación
-          </h2>
-          <div className="mt-4">
-            <label htmlFor="recording-title" className="mb-1.5 block text-sm font-semibold text-slate-600">
-              Título
-            </label>
-            <input
-              id="recording-title"
-              value={recordingTitle}
-              onChange={(e) => setRecordingTitle(e.target.value)}
-              autoFocus
-              placeholder={pendingRecording.name}
-              aria-label="Título de la grabación"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") confirmRecording();
-              }}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-400"
-            />
-          </div>
-          <div className="mt-3">
-            <label htmlFor="recording-project" className="mb-1.5 block text-sm font-semibold text-slate-600">
-              Proyecto
-            </label>
-            <select
-              id="recording-project"
-              value={recordingProject}
-              onChange={(e) => setRecordingProject(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-400"
-            >
-              <option value="">Sin proyecto</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.icon ? `${p.icon} ` : ""}
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={discardRecording}>
-              Descartar
-            </Button>
-            <Button size="sm" onClick={confirmRecording}>
-              Agregar a la cola
-            </Button>
-          </div>
-        </Modal>
-      )}
-
       {/* Cola de audios */}
       {items.length > 0 && (
         <ul className="mt-4 space-y-2" aria-live="polite">
@@ -609,8 +520,8 @@ export function TranscribeWorkspace({
             >
               <StatusDot status={it.status} />
               <div className="min-w-0 flex-1">
-                {/* Ítems que vinieron del modal "Guardar grabación" muestran el título elegido;
-                    el resto (archivos subidos a mano) muestra el nombre de archivo, como antes. */}
+                {/* Las grabaciones (mic/captura) muestran su título automático; los archivos
+                    subidos a mano muestran el nombre de archivo. */}
                 <p className="truncate text-sm font-medium text-slate-800">{it.title || it.file.name}</p>
                 <p className="text-xs text-slate-400">
                   {formatFileSize(it.file.size)}
