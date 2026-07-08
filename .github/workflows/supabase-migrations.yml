@@ -1,0 +1,29 @@
+name: Migraciones Supabase
+
+# Aplica automáticamente las migraciones de supabase/migrations/ a la base de
+# producción cada vez que se pushea un cambio de migración a main.
+# También se puede disparar a mano desde la pestaña Actions (workflow_dispatch).
+#
+# Requisito: cargar el secret SUPABASE_DB_URL en el repo (ver .github/MIGRACIONES.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+  workflow_dispatch: {}
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Aplicar migraciones pendientes
+        run: supabase db push --db-url "${{ secrets.SUPABASE_DB_URL }}"
