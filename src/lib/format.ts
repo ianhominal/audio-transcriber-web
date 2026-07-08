@@ -42,6 +42,26 @@ export function formatRecordingFileName(prefix: string, timestampMs: number, ext
   return `${prefix}-${timestampMs}.${safeExt}`;
 }
 
+/**
+ * Deriva un título por defecto a partir del nombre de archivo de una grabación (le saca la
+ * extensión). Usado para prellenar el campo "Título" del modal que aparece al terminar de grabar
+ * o capturar una reunión, antes de que el usuario confirme o lo edite.
+ */
+export function defaultTitleFromFileName(fileName: string): string {
+  return (fileName ?? "").replace(/\.[^./\\]+$/, "");
+}
+
+/**
+ * Resuelve el proyecto que debería quedar preseleccionado en el modal de "Guardar grabación",
+ * a partir del valor actual del selector "Proyecto destino" (`destino`, en `TranscribeWorkspace`).
+ * `""` (sin proyecto) y `"__new__"` (crear proyecto nuevo, todavía no existe) resuelven a `null`
+ * — no hay proyecto real para preseleccionar en ninguno de los dos casos.
+ */
+export function resolveDefaultProjectId(destino: string): string | null {
+  if (!destino || destino === "__new__") return null;
+  return destino;
+}
+
 export type ProjectNameResult = { ok: true; value: string } | { ok: false; error: string };
 
 /** Valida y normaliza el nombre de un proyecto. */

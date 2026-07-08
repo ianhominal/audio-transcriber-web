@@ -5,6 +5,8 @@ import {
   formatDate,
   validateProjectName,
   formatRecordingFileName,
+  defaultTitleFromFileName,
+  resolveDefaultProjectId,
   buildMarkdownExport,
   parseMarkdownExport,
   slugifyFileName,
@@ -65,6 +67,34 @@ describe("formatRecordingFileName", () => {
   it("acepta la extensión con o sin punto inicial", () => {
     expect(formatRecordingFileName("Reunion", 123, ".webm")).toBe("Reunion-123.webm");
     expect(formatRecordingFileName("Reunion", 123, "webm")).toBe("Reunion-123.webm");
+  });
+});
+
+describe("defaultTitleFromFileName", () => {
+  it("le saca la extensión al nombre de archivo", () => {
+    expect(defaultTitleFromFileName("Grabacion-1720368000000.webm")).toBe("Grabacion-1720368000000");
+    expect(defaultTitleFromFileName("Reunion-123.ogg")).toBe("Reunion-123");
+  });
+
+  it("tolera nombres sin extensión", () => {
+    expect(defaultTitleFromFileName("SinExtension")).toBe("SinExtension");
+  });
+
+  it("tolera valores vacíos o inválidos", () => {
+    expect(defaultTitleFromFileName("")).toBe("");
+    // @ts-expect-error valor inválido a propósito, para probar la tolerancia en runtime
+    expect(defaultTitleFromFileName(undefined)).toBe("");
+  });
+});
+
+describe("resolveDefaultProjectId", () => {
+  it("devuelve el id del proyecto activo cuando hay uno seleccionado", () => {
+    expect(resolveDefaultProjectId("proj-123")).toBe("proj-123");
+  });
+
+  it("devuelve null cuando no hay proyecto (\"\") o se está creando uno nuevo (\"__new__\")", () => {
+    expect(resolveDefaultProjectId("")).toBeNull();
+    expect(resolveDefaultProjectId("__new__")).toBeNull();
   });
 });
 

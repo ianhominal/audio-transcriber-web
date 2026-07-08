@@ -143,8 +143,16 @@ export async function POST(req: NextRequest) {
     /* seguir sin audio */
   }
 
-  // 4) Guardar la transcripción. Acepta un proyecto destino opcional.
+  // 4) Guardar la transcripción. Acepta un proyecto destino y un título opcionales (el título lo
+  //    manda, por ejemplo, el modal de "Guardar grabación" en TranscribeWorkspace; si no viene,
+  //    la transcripción queda sin título propio, igual que hoy — la UI usa `audio_name` como
+  //    fallback visual hasta que el usuario lo edite desde el detalle).
   const projectId = (form.get("projectId") as string) || null;
+  const titleRaw = (form.get("title") as string) || "";
+  // Columna `title` es NOT NULL DEFAULT '' (ver migración transcription_title): si no viene
+  // título, guardamos "" (no null) — la UI ya usa `audio_name` como fallback visual cuando
+  // `title` está vacío (ver placeholder en TranscriptionDetail).
+  const title = titleRaw.trim().slice(0, 120);
   let savedId: string | null = null;
   try {
     const { data: inserted } = await supabase
@@ -152,6 +160,7 @@ export async function POST(req: NextRequest) {
       .insert({
         user_id: user.id,
         project_id: projectId,
+        title,
         audio_name: audioName,
         audio_size: file.size,
         audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
