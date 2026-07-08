@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
+import { canConnectFolderLevel, validateNewFolderName } from "@/lib/drive/folder-connect";
 
 type DriveFolder = { id: string; name: string };
 type Crumb = { id: string; name: string };
@@ -34,8 +35,13 @@ export function DriveFolderConnect() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [createFolderError, setCreateFolderError] = useState<string | null>(null);
 
   const current = crumbs[crumbs.length - 1];
+  const canConnect = canConnectFolderLevel(current.id);
 
   useEffect(() => {
     if (!open) return;
@@ -78,11 +84,22 @@ export function DriveFolderConnect() {
     setOpen(false);
   }
 
+  // Al navegar a otro nivel se descarta el formulario de "crear carpeta" abierto en el nivel
+  // anterior (evento explícito del usuario, no un efecto derivado — evita el
+  // `react-hooks/set-state-in-effect` que ya se sortea en `loadFolders` de otra forma).
+  function resetCreateForm() {
+    setShowCreateForm(false);
+    setNewFolderName("");
+    setCreateFolderError(null);
+  }
+
   function enterFolder(folder: DriveFolder) {
+    resetCreateForm();
     setCrumbs((prev) => [...prev, { id: folder.id, name: folder.name }]);
   }
 
   function goToCrumb(index: number) {
+    resetCreateForm();
     setCrumbs((prev) => prev.slice(0, index + 1));
   }
 
@@ -109,6 +126,40 @@ export function DriveFolderConnect() {
     }
   }
 
+  function toggleCreateForm() {
+    setShowCreateForm((v) => !v);
+    setNewFolderName("");
+    setCreateFolderError(null);
+  }
+
+  async function submitCreateFolder() {
+    const parsed = validateNewFolderName(newFolderName);
+    if (!parsed.ok) {
+      setCreateFolderError(parsed.error);
+      return;
+    }
+    setCreatingFolder(true);
+    setCreateFolderError(null);
+    try {
+      const res = await fetch("/api/drive/folders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId: current.id, name: parsed.value }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "No se pudo crear la carpeta.");
+      const created: DriveFolder = { id: body.id as string, name: body.name as string };
+      setFolders((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, "es")));
+      setShowCreateForm(false);
+      setNewFolderName("");
+      toast(`Carpeta "${created.name}" creada.`, "success");
+    } catch (err) {
+      setCreateFolderError(err instanceof Error ? err.message : "No se pudo crear la carpeta.");
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
   if (!open) {
     return (
       <Button variant="secondary" onClick={openModal}>
@@ -132,6 +183,13 @@ export function DriveFolderConnect() {
           ✕
         </button>
       </div>
+
+      {!summary && (
+        <p className="mt-1 text-xs text-slate-500">
+          Entrá a una carpeta puntual de Drive (o creá una nueva) y conectala: se importa esa carpeta junto con
+          toda su jerarquía de subcarpetas y notas .md.
+        </p>
+      )}
 
       {summary ? (
         <div className="mt-4 space-y-2 text-sm">
@@ -215,13 +273,60 @@ export function DriveFolderConnect() {
             )}
           </div>
 
-          <p className="mt-2 text-xs text-slate-400">
-            Se importa &quot;{current.name}&quot; con toda su jerarquía de subcarpetas y notas .md.
-          </p>
+          {/* Crear carpeta nueva en el nivel actual */}
+          <div className="mt-2">
+            {showCreateForm ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitCreateFolder();
+                    if (e.key === "Escape") toggleCreateForm();
+                  }}
+                  disabled={creatingFolder}
+                  placeholder="Nombre de la carpeta"
+                  aria-label="Nombre de la carpeta nueva"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-brand-500 focus:outline-none disabled:opacity-50"
+                />
+                <Button size="sm" onClick={submitCreateFolder} loading={creatingFolder}>
+                  Crear
+                </Button>
+                <Button size="sm" variant="secondary" onClick={toggleCreateForm} disabled={creatingFolder}>
+                  Cancelar
+                </Button>
+              </div>
+            ) : (
+              <button
+                onClick={toggleCreateForm}
+                disabled={connecting || loading}
+                className="text-xs font-medium text-brand-600 transition hover:underline disabled:opacity-50"
+              >
+                ➕ Crear carpeta nueva acá
+              </button>
+            )}
+            {createFolderError && <p className="mt-1 text-xs text-red-600">{createFolderError}</p>}
+          </div>
+
+          {canConnect ? (
+            <p className="mt-2 text-xs text-slate-400">
+              Se importa &quot;{current.name}&quot; con toda su jerarquía de subcarpetas y notas .md.
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-amber-600">
+              Entrá a una carpeta o creá una nueva para conectarla — conectar acá importaría TODO tu Drive.
+            </p>
+          )}
 
           <div className="mt-3 flex gap-2">
-            <Button onClick={connectCurrent} loading={connecting} disabled={loading} className="flex-1">
-              {connecting ? "Importando… puede tardar" : `Conectar "${current.name}"`}
+            <Button
+              onClick={connectCurrent}
+              loading={connecting}
+              disabled={loading || !canConnect}
+              className="flex-1"
+            >
+              {connecting ? "Importando… puede tardar" : canConnect ? `Conectar "${current.name}"` : "Entrá a una carpeta"}
             </Button>
             <Button variant="secondary" onClick={closeModal} disabled={connecting}>
               Cancelar
