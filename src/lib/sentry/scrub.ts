@@ -29,6 +29,28 @@ const SENSITIVE_KEY_PATTERN =
 /** Headers que NUNCA se envían, más allá de si matchean el patrón anterior. */
 const ALWAYS_STRIPPED_HEADERS = new Set(["cookie", "set-cookie", "authorization"]);
 
+/**
+ * Patrones de secreto que pueden aparecer LIBRES dentro de `breadcrumb.message` — a diferencia de
+ * `redactSensitiveKeys` (redacta por NOMBRE de key en objetos), acá no hay key: Sentry captura
+ * breadcrumbs de `console.*` con texto libre en `.message` (ej. un `console.error` que loguea el
+ * header completo o el token recibido), así que se redacta por CONTENIDO.
+ *
+ * Conservador a propósito (mismo criterio que el resto del archivo): el patrón de "string largo
+ * sin espacios" puede redactar de más (ej. un UUID de proyecto/transcripción no es un secreto),
+ * pero preferimos ese falso positivo antes que dejar pasar un token real.
+ */
+const BEARER_TOKEN_PATTERN = /\bBearer\s+\S+/gi;
+const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
+const LONG_TOKEN_LOOKALIKE_PATTERN = /\b[A-Za-z0-9_-]{24,}\b/g;
+
+/** Redacta secretos por contenido (no por key) en un texto libre. Puro, sin mutar el input. */
+function scrubMessageContent(message: string): string {
+  return message
+    .replace(BEARER_TOKEN_PATTERN, `Bearer ${REDACTED}`)
+    .replace(JWT_PATTERN, REDACTED)
+    .replace(LONG_TOKEN_LOOKALIKE_PATTERN, REDACTED);
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -95,8 +117,12 @@ function scrubQueryString(queryString: QueryParams | undefined): QueryParams | u
 }
 
 function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
-  if (!breadcrumb.data) return breadcrumb;
-  return { ...breadcrumb, data: redactSensitiveKeys(breadcrumb.data) };
+  if (!breadcrumb.data && !breadcrumb.message) return breadcrumb;
+  return {
+    ...breadcrumb,
+    data: breadcrumb.data ? redactSensitiveKeys(breadcrumb.data) : breadcrumb.data,
+    message: breadcrumb.message ? scrubMessageContent(breadcrumb.message) : breadcrumb.message,
+  };
 }
 
 /**
@@ -112,6 +138,9 @@ function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
  * - `request.headers` / `request.query_string`: se redactan por nombre (Authorization, Cookie,
  *   y cualquier header/param que matchee token|secret|key|password|credential|auth).
  * - `extra`, `contexts`, `breadcrumbs[].data`: redacción recursiva por nombre de key.
+ * - `breadcrumbs[].message`: redacción por CONTENIDO (no hay key acá — es texto libre, típico de
+ *   breadcrumbs de `console.*`) de patrones tipo `Bearer <token>`, JWT (`eyJ...`) y strings largos
+ *   sin espacios que parezcan token.
  */
 export function scrubSentryEvent<T extends SentryEvent>(event: T): T {
   const scrubbed: T = { ...event };

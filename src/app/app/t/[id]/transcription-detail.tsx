@@ -47,6 +47,15 @@ export function TranscriptionDetail({
   const [text, setText] = useState(transcription.text);
   const [description, setDescription] = useState(transcription.description);
   const [icon, setIcon] = useState(transcription.icon);
+  // Baseline contra el que se compara "hay cambios sin guardar" (`dirty`). Se actualiza recién
+  // cuando `save()` confirma éxito — NO se lee/escribe `transcription` (prop) directamente: mutar
+  // props/argumentos de hook está prohibido (ver `react-hooks/immutability`).
+  const [baseline, setBaseline] = useState({
+    title: transcription.title,
+    text: transcription.text,
+    description: transcription.description,
+    icon: transcription.icon,
+  });
   const [projectId, setProjectId] = useState<string | null>(transcription.project_id);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
@@ -65,12 +74,12 @@ export function TranscriptionDetail({
 
   const projectName = projects.find((p) => p.id === projectId)?.name ?? null;
 
-  // Hay cambio real si cambió el título, el texto, la descripción o el ícono.
+  // Hay cambio real si cambió el título, el texto, la descripción o el ícono respecto del baseline.
   const dirty =
-    title !== transcription.title ||
-    text !== transcription.text ||
-    description !== transcription.description ||
-    icon !== transcription.icon;
+    title !== baseline.title ||
+    text !== baseline.text ||
+    description !== baseline.description ||
+    icon !== baseline.icon;
 
   async function save() {
     if (!dirty) return;
@@ -78,10 +87,7 @@ export function TranscriptionDetail({
     const res = await updateTranscription(transcription.id, { title, text, description, icon });
     setSaving(false);
     if (res.ok) {
-      transcription.title = title;
-      transcription.text = text;
-      transcription.description = description;
-      transcription.icon = icon;
+      setBaseline({ title, text, description, icon });
       setJustSaved(true);
       toast("Guardado.", "success");
       setTimeout(() => setJustSaved(false), 2000);

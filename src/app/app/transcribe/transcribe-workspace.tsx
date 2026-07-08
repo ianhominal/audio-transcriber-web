@@ -57,14 +57,14 @@ export function TranscribeWorkspace({
   const [destino, setDestino] = useState<string>(initialProject); // "" | projectId | "__new__"
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("📁");
-  const [language, setLanguage] = useState("es"); // default español; recordamos la última elección
+  // Idioma: lazy initializer (no `useEffect` + `setState` en mount, que dispara
+  // `react-hooks/set-state-in-effect`) — lee la última preferencia persistida en el navegador
+  // directo al inicializar el estado. `typeof window` guard porque el initializer también corre
+  // en el render de servidor (componente "use client" igual se renderiza en SSR).
+  const [language, setLanguage] = useState<string>(() =>
+    typeof window !== "undefined" ? localStorage.getItem("transcribe:language") || "es" : "es"
+  );
   const [model, setModel] = useState("whisper-large-v3-turbo");
-
-  // Recuperar la última preferencia de idioma (persistida en el navegador).
-  useEffect(() => {
-    const saved = localStorage.getItem("transcribe:language");
-    if (saved) setLanguage(saved);
-  }, []);
 
   const changeLanguage = (value: string) => {
     setLanguage(value);

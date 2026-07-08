@@ -9,7 +9,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "@/lib/crypto";
-import { getAccessToken } from "./api";
+import { getAccessToken, DriveApiError } from "./api";
+import { markDriveConnectionRevoked } from "./connection-status-compat";
 
 /** El usuario no tiene fila en `drive_connections` (nunca conectó, o revocó el permiso). */
 export class DriveNotConnectedError extends Error {
@@ -33,5 +34,14 @@ export async function getUserDriveAccessToken(
     throw new DriveNotConnectedError();
   }
   const refreshToken = decryptSecret(data.refresh_token_encrypted as string, config.tokenKey);
-  return getAccessToken(refreshToken, config.clientId, config.clientSecret);
+  try {
+    return await getAccessToken(refreshToken, config.clientId, config.clientSecret);
+  } catch (err) {
+    // `invalid_grant` = Google revocó el refresh token: el chip "conectado" de Ajustes mentiría
+    // si no reflejamos esto (ver migración `20260707140000_drive_connection_status.sql`).
+    if (err instanceof DriveApiError && err.code === "invalid_grant") {
+      await markDriveConnectionRevoked(supabase, userId);
+    }
+    throw err;
+  }
 }

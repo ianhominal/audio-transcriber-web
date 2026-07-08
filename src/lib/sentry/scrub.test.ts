@@ -117,6 +117,51 @@ describe("scrubSentryEvent", () => {
     expect(result.breadcrumbs?.[1]).toEqual({ category: "ui.click" });
   });
 
+  it("redacta un header Authorization completo en breadcrumb.message (breadcrumb de console.*)", () => {
+    const event = baseEvent({
+      breadcrumbs: [
+        { category: "console", level: "error", message: "fetch failed: Authorization: Bearer sk-supersecreto-123" },
+      ],
+    });
+
+    const result = scrubSentryEvent(event);
+
+    expect(result.breadcrumbs?.[0].message).toBe("fetch failed: Authorization: Bearer [redacted]");
+  });
+
+  it("redacta un JWT en breadcrumb.message", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+    const event = baseEvent({
+      breadcrumbs: [{ category: "console", level: "error", message: `token inválido: ${jwt}` }],
+    });
+
+    const result = scrubSentryEvent(event);
+
+    expect(result.breadcrumbs?.[0].message).toBe("token inválido: [redacted]");
+  });
+
+  it("redacta un string largo sin espacios que parece token, sin tocar el resto del mensaje", () => {
+    const event = baseEvent({
+      breadcrumbs: [
+        { category: "console", level: "error", message: "drive sync falló con refresh token aBcD1234EfGh5678IjKl9012MnOp" },
+      ],
+    });
+
+    const result = scrubSentryEvent(event);
+
+    expect(result.breadcrumbs?.[0].message).toBe("drive sync falló con refresh token [redacted]");
+  });
+
+  it("no toca un mensaje normal sin secretos", () => {
+    const event = baseEvent({
+      breadcrumbs: [{ category: "console", level: "log", message: "usuario navegó a /app/ajustes" }],
+    });
+
+    const result = scrubSentryEvent(event);
+
+    expect(result.breadcrumbs?.[0].message).toBe("usuario navegó a /app/ajustes");
+  });
+
   it("no toca eventos sin request/extra/contexts/breadcrumbs", () => {
     const event = baseEvent();
 

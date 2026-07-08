@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getApiUser } from "@/lib/supabase/api";
 import { encryptSecret, verifyState } from "@/lib/crypto";
 import { GOOGLE_TOKEN_URL, OAUTH_STATE_MAX_AGE_MS, driveCallbackUrl, type DriveOAuthState } from "@/lib/drive/oauth";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
 
@@ -94,14 +95,25 @@ export async function GET(req: NextRequest) {
 
   const refreshTokenEncrypted = encryptSecret(tokenData.refresh_token, tokenKey);
 
-  const { error: dbError } = await supabase.from("drive_connections").upsert(
-    {
-      user_id: user.id,
-      refresh_token_encrypted: refreshTokenEncrypted,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" }
-  );
+  const baseConnectionRow = {
+    user_id: user.id,
+    refresh_token_encrypted: refreshTokenEncrypted,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Reconectar (después de una revocación o la primera vez) siempre deja la conexión como
+  // 'active': acabamos de canjear un `code` fresco, así que el token es válido de nuevo. Intento
+  // directo con `status` incluido (attempt-first, ver `src/lib/supabase/schema-compat.ts`); si la
+  // columna todavía no existe en el esquema real, reintenta sin ella.
+  let { error: dbError } = await supabase
+    .from("drive_connections")
+    .upsert({ ...baseConnectionRow, status: "active" }, { onConflict: "user_id" });
+
+  if (dbError && isMissingColumnError(dbError)) {
+    ({ error: dbError } = await supabase
+      .from("drive_connections")
+      .upsert(baseConnectionRow, { onConflict: "user_id" }));
+  }
 
   if (dbError) {
     console.error("[drive/callback] error guardando drive_connections:", dbError.message);

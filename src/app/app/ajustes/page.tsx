@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
+import { getDriveConnectionStatusCompat } from "@/lib/drive/connection-status-compat";
 import { DriveFolderConnect } from "./drive-folder-connect";
 
 const DRIVE_STATUS_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
@@ -29,13 +30,12 @@ export default async function AjustesPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: connection } = user
-    ? await supabase
-        .from("drive_connections")
-        .select("connected_at")
-        .eq("user_id", user.id)
-        .maybeSingle()
-    : { data: null };
+  // `status` distingue conexión ACTIVA de token revocado por Google (el usuario existe en
+  // `drive_connections` pero ya no sirve) — ver migración `20260707140000_drive_connection_status.sql`
+  // y `src/lib/drive/connection-status-compat.ts` (degrada a 'active' si la migración no corrió).
+  const connectionStatus = user ? await getDriveConnectionStatusCompat(supabase, user.id) : null;
+  const isConnected = connectionStatus !== null;
+  const isRevoked = connectionStatus === "revoked";
 
   const message = driveStatus ? DRIVE_STATUS_MESSAGES[driveStatus] : null;
 
@@ -72,18 +72,25 @@ export default async function AjustesPage({
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          {connection ? (
+          {isConnected && !isRevoked ? (
             <p className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
               <span aria-hidden="true">✓</span> Google Drive conectado
             </p>
           ) : (
-            <a href="/api/drive/connect" className={buttonClasses({ size: "md" })}>
-              Conectar Google Drive
-            </a>
+            <div className="flex flex-wrap items-center gap-3">
+              {isRevoked && (
+                <p className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                  <span aria-hidden="true">⚠️</span> Se venció el permiso de Google Drive
+                </p>
+              )}
+              <a href="/api/drive/connect" className={buttonClasses({ size: "md" })}>
+                {isRevoked ? "Reconectá Google Drive" : "Conectar Google Drive"}
+              </a>
+            </div>
           )}
         </div>
 
-        {connection && (
+        {isConnected && !isRevoked && (
           <div className="mt-4 border-t border-slate-100 pt-4">
             <p className="text-sm text-slate-500">
               Conectá una carpeta existente para traerla con toda su jerarquía de subcarpetas y notas.

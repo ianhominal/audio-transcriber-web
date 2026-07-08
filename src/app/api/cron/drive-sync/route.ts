@@ -30,6 +30,7 @@ import {
   markSchemaCompatResult,
   shouldRedetectSchemaCompat,
 } from "@/lib/supabase/schema-compat";
+import { markDriveConnectionRevoked } from "@/lib/drive/connection-status-compat";
 
 export const runtime = "nodejs";
 
@@ -102,11 +103,18 @@ export async function GET(req: NextRequest) {
       // Best-effort: un usuario que falla no frena a los demás (ver doc del endpoint arriba).
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[cron/drive-sync] error sincronizando usuario ${conn.user_id}:`, message);
+      const needsReauth = err instanceof DriveApiError && err.code === "invalid_grant";
+      if (needsReauth) {
+        // Google revocó el refresh token: reflejarlo en `drive_connections.status` para que
+        // Ajustes deje de mostrar el chip verde "conectado" (ver migración
+        // `20260707140000_drive_connection_status.sql`). Best-effort, no bloquea el resultado.
+        await markDriveConnectionRevoked(supabase, conn.user_id);
+      }
       results.push({
         userId: conn.user_id,
         ok: false,
         error: message,
-        needsReauth: err instanceof DriveApiError && err.code === "invalid_grant",
+        needsReauth,
       });
     }
   }
