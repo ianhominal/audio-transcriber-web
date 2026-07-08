@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getApiUser } from "@/lib/supabase/api";
 import { AUDIO_BUCKET } from "@/lib/storage";
@@ -114,9 +115,23 @@ export async function GET(req: NextRequest) {
     const transcriptionsWithAudio = await Promise.all(
       (transcriptions ?? []).map(async (t) => {
         if (!t.audio_url) return { ...t, audio_url_signed: null };
-        const { data: signed } = await supabase.storage
+        const { data: signed, error: signError } = await supabase.storage
           .from(AUDIO_BUCKET)
           .createSignedUrl(t.audio_url, 60 * 60);
+        if (signError) {
+          // Visibility only: on failure we still return audio_url_signed: null, same as
+          // before — this does not change behavior, it just stops the failure from being
+          // silent (see .claude/resources/changelog for the cross-repo motivation).
+          console.error("[sync/pull] createSignedUrl failed", {
+            transcriptionId: t.id,
+            audioUrl: t.audio_url,
+            error: signError.message,
+            name: signError.name,
+          });
+          Sentry.captureException(signError, {
+            extra: { transcriptionId: t.id, audioUrl: t.audio_url, stage: "sync-pull-signed-url" },
+          });
+        }
         return { ...t, audio_url_signed: signed?.signedUrl ?? null };
       })
     );
