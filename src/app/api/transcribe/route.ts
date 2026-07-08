@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { getApiUser } from "@/lib/supabase/api";
 import { AUDIO_BUCKET, audioExtension, buildAudioObjectPath } from "@/lib/storage";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
+import { resolveGroqModel } from "@/lib/transcribe/model";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,7 +38,9 @@ export async function POST(req: NextRequest) {
 
   const file = form.get("file");
   const language = (form.get("language") as string) || "es";
-  const model = (form.get("model") as string) || "whisper-large-v3-turbo";
+  // El modelo lo elige el cliente, pero SIEMPRE se valida contra una allowlist estricta
+  // antes de mandarlo a Groq (ver src/lib/transcribe/model.ts) — nunca se reenvía tal cual.
+  const model = resolveGroqModel(form.get("model"));
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No se recibió ningún audio." }, { status: 400 });
