@@ -6,6 +6,7 @@ import {
   validateProjectName,
   formatRecordingFileName,
   defaultTitleFromFileName,
+  normalizeQueueTitle,
   buildMarkdownExport,
   parseMarkdownExport,
   slugifyFileName,
@@ -83,6 +84,22 @@ describe("defaultTitleFromFileName", () => {
     expect(defaultTitleFromFileName("")).toBe("");
     // @ts-expect-error valor inválido a propósito, para probar la tolerancia en runtime
     expect(defaultTitleFromFileName(undefined)).toBe("");
+  });
+});
+
+describe("normalizeQueueTitle", () => {
+  it("recorta espacios al inicio y al final", () => {
+    expect(normalizeQueueTitle("  Reunión de equipo  ", "Grabacion-1")).toBe("Reunión de equipo");
+  });
+
+  it("vuelve al fallback si el título editado queda vacío", () => {
+    expect(normalizeQueueTitle("", "Grabacion-1720368000000")).toBe("Grabacion-1720368000000");
+    expect(normalizeQueueTitle("   ", "audio.mp3")).toBe("audio.mp3");
+  });
+
+  it("tolera valores inválidos como si estuvieran vacíos", () => {
+    // @ts-expect-error valor inválido a propósito, para probar la tolerancia en runtime
+    expect(normalizeQueueTitle(undefined, "fallback")).toBe("fallback");
   });
 });
 

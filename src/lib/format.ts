@@ -51,6 +51,16 @@ export function defaultTitleFromFileName(fileName: string): string {
   return (fileName ?? "").replace(/\.[^./\\]+$/, "");
 }
 
+/**
+ * Normaliza un título editado inline en la cola de transcripción: recorta espacios y, si queda
+ * vacío, vuelve al `fallback` (el título que tenía el ítem antes de editar) — así nunca se manda
+ * un título vacío en el POST a /api/transcribe.
+ */
+export function normalizeQueueTitle(edited: string, fallback: string): string {
+  const trimmed = (edited ?? "").trim();
+  return trimmed || fallback;
+}
+
 export type ProjectNameResult = { ok: true; value: string } | { ok: false; error: string };
 
 /** Valida y normaliza el nombre de un proyecto. */

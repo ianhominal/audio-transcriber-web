@@ -10,6 +10,7 @@ import {
   formatDuration,
   formatRecordingFileName,
   defaultTitleFromFileName,
+  normalizeQueueTitle,
 } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -51,10 +52,11 @@ type Item = {
   status: Status;
   resultId?: string;
   error?: string;
-  // Título automático de las grabaciones (mic/captura), ej. "Grabacion-1720368000000". El
-  // usuario puede renombrarlo después en el detalle de la transcripción. Los archivos subidos a
-  // mano no traen `title`: se muestra `file.name` (ver JSX de la cola más abajo).
-  title?: string;
+  // Título editable en la cola. Para grabaciones (mic/captura) arranca en el automático, ej.
+  // "Grabacion-1720368000000"; para archivos subidos arranca en `file.name`. En ambos casos el
+  // usuario puede editarlo inline en la cola (click en el título) antes de transcribir — ver JSX
+  // de la cola más abajo y `normalizeQueueTitle` en @/lib/format.
+  title: string;
 };
 
 let counter = 0;
@@ -89,6 +91,11 @@ export function TranscribeWorkspace({
   const [running, setRunning] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [topError, setTopError] = useState("");
+  // Edición inline del título en la cola: `editingKey` es el ítem en edición (null = ninguno) y
+  // `editDraft` el valor del <input> mientras se edita. Reemplaza el modal "Guardar grabación"
+  // que se sacó por molesto/con pérdida de datos — ver comentario en `enqueueRecording`.
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const runningRef = useRef(false); // guard SÍNCRONO contra doble-submit
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -128,6 +135,7 @@ export function TranscribeWorkspace({
       key: nextKey(),
       file,
       status: "pending" as Status,
+      title: file.name,
     }));
     setItems((prev) => [...prev, ...nuevos]);
   }, []);
@@ -268,6 +276,17 @@ export function TranscribeWorkspace({
 
   const patch = (key: string, data: Partial<Item>) =>
     setItems((prev) => prev.map((i) => (i.key === key ? { ...i, ...data } : i)));
+
+  // Edición inline del título: click en el título de un ítem pendiente lo convierte en <input>.
+  const startEditTitle = (item: Item) => {
+    setEditDraft(item.title);
+    setEditingKey(item.key);
+  };
+  const commitEditTitle = (item: Item) => {
+    patch(item.key, { title: normalizeQueueTitle(editDraft, item.title) });
+    setEditingKey(null);
+  };
+  const cancelEditTitle = () => setEditingKey(null);
 
   const pendingCount = items.filter((i) => i.status === "pending").length;
 
@@ -520,9 +539,47 @@ export function TranscribeWorkspace({
             >
               <StatusDot status={it.status} />
               <div className="min-w-0 flex-1">
-                {/* Las grabaciones (mic/captura) muestran su título automático; los archivos
-                    subidos a mano muestran el nombre de archivo. */}
-                <p className="truncate text-sm font-medium text-slate-800">{it.title || it.file.name}</p>
+                {/* Título editable inline mientras el ítem está pendiente: un click lo convierte
+                    en <input> (sin modal — ver comentario en `enqueueRecording`). Enter/blur
+                    confirma, Escape cancela. Aplica igual a grabaciones y archivos subidos. */}
+                {editingKey === it.key ? (
+                  <input
+                    autoFocus
+                    value={editDraft}
+                    onChange={(e) => setEditDraft(e.target.value)}
+                    onBlur={() => commitEditTitle(it)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        commitEditTitle(it);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        cancelEditTitle();
+                      }
+                    }}
+                    aria-label={`Editar título de ${it.title}`}
+                    className="w-full min-w-0 rounded-md border border-brand-400 px-2 py-1 text-sm font-medium text-slate-800 focus:outline-none"
+                  />
+                ) : it.status === "pending" && !running ? (
+                  <button
+                    type="button"
+                    onClick={() => startEditTitle(it)}
+                    className="group flex max-w-full items-center gap-1.5 text-left"
+                    aria-label={`Editar título de ${it.title}`}
+                  >
+                    <span className="truncate text-sm font-medium text-slate-800 group-hover:text-brand-600">
+                      {it.title}
+                    </span>
+                    <span
+                      className="shrink-0 text-xs text-slate-300 group-hover:text-brand-400"
+                      aria-hidden="true"
+                    >
+                      ✏️
+                    </span>
+                  </button>
+                ) : (
+                  <p className="truncate text-sm font-medium text-slate-800">{it.title}</p>
+                )}
                 <p className="text-xs text-slate-400">
                   {formatFileSize(it.file.size)}
                   {it.status === "duplicate" && " · ya estaba guardado"}
@@ -534,11 +591,11 @@ export function TranscribeWorkspace({
                   Ver
                 </Link>
               )}
-              {it.status === "pending" && !running && (
+              {it.status === "pending" && !running && editingKey !== it.key && (
                 <button
                   onClick={() => removeItem(it.key)}
                   className="rounded p-0.5 text-slate-300 transition hover:text-red-500"
-                  aria-label={`Quitar ${it.file.name} de la cola`}
+                  aria-label={`Quitar ${it.title} de la cola`}
                 >
                   ✕
                 </button>
