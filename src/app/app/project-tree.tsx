@@ -22,6 +22,9 @@ export function ProjectTree({
 }) {
   const tree = buildProjectTree(projects);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // Todos los ids de proyectos del usuario: se pasa a cada fila para validar el destino de un
+  // drop de drag & drop (defensa en profundidad, ver `resolveTranscriptionDrop`).
+  const knownProjectIds = projects.map((p) => p.id);
 
   function toggle(id: string) {
     setCollapsed((prev) => {
@@ -44,6 +47,7 @@ export function ProjectTree({
           hasChildren={node.children.length > 0}
           expanded={expanded}
           onToggleExpand={() => toggle(node.id)}
+          knownProjectIds={knownProjectIds}
         />
         {expanded && node.children.map((child) => renderNode(child, depth + 1))}
       </div>

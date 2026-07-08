@@ -5,9 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { IconMenu, MenuItem } from "./icon-menu";
 import { EmojiPicker } from "./emoji-picker";
-import { renameProject, duplicateProject, deleteProject } from "./actions";
+import { renameProject, duplicateProject, deleteProject, assignTranscriptionToProject } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import {
+  TRANSCRIPTION_DRAG_MIME,
+  decodeTranscriptionDragPayload,
+  resolveTranscriptionDrop,
+} from "@/lib/dnd/transcriptionDrag";
 
 type Project = { id: string; name: string; icon: string; syncOrigin?: string };
 
@@ -19,6 +24,7 @@ export function ProjectRow({
   hasChildren = false,
   expanded = true,
   onToggleExpand,
+  knownProjectIds = [],
 }: {
   project: Project;
   count: number;
@@ -29,6 +35,8 @@ export function ProjectRow({
   hasChildren?: boolean;
   expanded?: boolean;
   onToggleExpand?: () => void;
+  /** Ids de todos los proyectos del usuario, para validar el destino de un drop (drag & drop). */
+  knownProjectIds?: readonly string[];
 }) {
   const router = useRouter();
   const { show: toast } = useToast();
@@ -36,6 +44,33 @@ export function ProjectRow({
   const [name, setName] = useState(project.name);
   const [icon, setIcon] = useState(project.icon || "📁");
   const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  /** Mecanismo 1 (drag & drop) de mover una transcripción a este proyecto: soltarla acá cambia su
+   * `project_id` reusando la misma server action que el menú "..." de la fila (mecanismo 2). */
+  function handleDragOver(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes(TRANSCRIPTION_DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver(true);
+  }
+
+  function handleDragLeave() {
+    setDragOver(false);
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes(TRANSCRIPTION_DRAG_MIME)) return;
+    e.preventDefault();
+    setDragOver(false);
+    const payload = decodeTranscriptionDragPayload(e.dataTransfer.getData(TRANSCRIPTION_DRAG_MIME));
+    if (!payload) return;
+    const resolution = resolveTranscriptionDrop(payload, project.id, knownProjectIds);
+    if (!resolution.shouldMove) return;
+    const res = await assignTranscriptionToProject(resolution.id, resolution.projectId);
+    toast(res.ok ? `Movido a ${project.name}.` : "No se pudo mover la transcripción.", res.ok ? "success" : "error");
+    router.refresh();
+  }
 
   async function saveRename() {
     setBusy(true);
@@ -91,9 +126,12 @@ export function ProjectRow({
 
   return (
     <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
         active ? "bg-brand-50" : "hover:bg-slate-100"
-      }`}
+      } ${dragOver ? "bg-brand-100 ring-2 ring-inset ring-brand-400" : ""}`}
     >
       <Link
         href={`/app?project=${project.id}`}

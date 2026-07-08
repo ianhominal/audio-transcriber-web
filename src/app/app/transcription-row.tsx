@@ -11,6 +11,10 @@ import {
   deleteTranscription,
   createProject,
 } from "./actions";
+import {
+  TRANSCRIPTION_DRAG_MIME,
+  encodeTranscriptionDragPayload,
+} from "@/lib/dnd/transcriptionDrag";
 
 type Transcription = {
   id: string;
@@ -34,14 +38,26 @@ export function TranscriptionRow({
   const { show: toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false); // borrado optimista
+  const [dragging, setDragging] = useState(false);
 
   const displayName = transcription.title || transcription.audio_name;
 
-  async function moveTo(projectId: string | null) {
+  /** Arranca el drag & drop nativo (mecanismo 1: arrastrar la fila a un proyecto del sidebar). El
+   * menú "..." (`moveTo` de abajo) es la alternativa accesible para quien no puede arrastrar. */
+  function handleDragStart(e: React.DragEvent<HTMLLIElement>) {
+    e.dataTransfer.setData(
+      TRANSCRIPTION_DRAG_MIME,
+      encodeTranscriptionDragPayload({ id: transcription.id, projectId: transcription.project_id })
+    );
+    e.dataTransfer.effectAllowed = "move";
+    setDragging(true);
+  }
+
+  async function moveTo(projectId: string | null, projectName: string) {
     setBusy(true);
     const res = await assignTranscriptionToProject(transcription.id, projectId);
     setBusy(false);
-    toast(res.ok ? "Transcripción movida." : "No se pudo mover la transcripción.", res.ok ? "success" : "error");
+    toast(res.ok ? `Movido a ${projectName}.` : "No se pudo mover la transcripción.", res.ok ? "success" : "error");
     router.refresh();
   }
 
@@ -78,11 +94,14 @@ export function TranscriptionRow({
 
   return (
     <li
-      className={`flex items-stretch gap-1 rounded-xl border border-slate-200 bg-white transition hover:border-brand-300 hover:shadow-sm ${
+      draggable={!busy}
+      onDragStart={handleDragStart}
+      onDragEnd={() => setDragging(false)}
+      className={`flex cursor-grab items-stretch gap-1 rounded-xl border border-slate-200 bg-white transition hover:border-brand-300 hover:shadow-sm active:cursor-grabbing ${
         busy ? "opacity-50" : ""
-      }`}
+      } ${dragging ? "opacity-40" : ""}`}
     >
-      <Link href={`/app/t/${transcription.id}`} className="block min-w-0 flex-1 p-4">
+      <Link href={`/app/t/${transcription.id}`} draggable={false} className="block min-w-0 flex-1 p-4">
         <div className="flex items-baseline justify-between gap-4">
           <p className="truncate font-semibold text-slate-800">
             <span className="mr-1.5">{transcription.icon || "📄"}</span>
@@ -102,11 +121,11 @@ export function TranscriptionRow({
                 Mover a
               </p>
               <div className="max-h-56 overflow-auto">
-                <MenuItem onClick={() => { moveTo(null); close(); }}>
+                <MenuItem onClick={() => { moveTo(null, "Sin proyecto"); close(); }}>
                   {transcription.project_id === null ? "✓ " : ""}📄 Sin proyecto
                 </MenuItem>
                 {projects.map((p) => (
-                  <MenuItem key={p.id} onClick={() => { moveTo(p.id); close(); }}>
+                  <MenuItem key={p.id} onClick={() => { moveTo(p.id, p.name); close(); }}>
                     {transcription.project_id === p.id ? "✓ " : ""}
                     {p.icon || "📁"} {p.name}
                   </MenuItem>

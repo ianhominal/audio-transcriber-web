@@ -16,6 +16,7 @@ import { ProjectHeader } from "./project-header";
 import { ProjectTree } from "./project-tree";
 import { SubfolderCard } from "./subfolder-card";
 import { TranscriptionRow } from "./transcription-row";
+import { UnassignedProjectLink } from "./unassigned-drop-link";
 
 type Transcription = {
   id: string;
@@ -167,13 +168,7 @@ export default async function Dashboard({
               counts={countsByProjectId}
               activeProjectId={filter && filter !== "none" ? filter : null}
             />
-            <SidebarLink
-              href="/app?project=none"
-              active={filter === "none"}
-              label="Sin proyecto"
-              count={noneCount}
-              icon="📄"
-            />
+            <UnassignedProjectLink active={filter === "none"} count={noneCount} />
           </nav>
         </div>
         <NewProjectButton />
