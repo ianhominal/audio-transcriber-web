@@ -120,7 +120,57 @@ export function collectProjectSubtreeIds(rootId: string, projects: ProjectParent
 }
 
 // ---------------------------------------------------------------------------
-// A.3 Anti-ciclo al reasignar padre (usado por /api/sync/push)
+// A.3 Guard de confirmación para borrado en cascada (usado por /api/sync/push)
+// ---------------------------------------------------------------------------
+
+export type ProjectDeletionPlan = {
+  /** El propio proyecto + todo su subárbol (mismo resultado que `collectProjectSubtreeIds`). */
+  subtreeIds: string[];
+  /** true si tiene al menos un proyecto descendiente (hijo, nieto, ...). */
+  hasChildren: boolean;
+  /** Cantidad de proyectos descendientes (subtreeIds.length - 1, sin contar al propio proyecto). */
+  childProjectCount: number;
+};
+
+/**
+ * Bug crítico de pérdida silenciosa de datos (C1): el cliente desktop ve los proyectos como
+ * lista PLANA (no conoce `parent_project_id`) y su freno anti-borrado-masivo solo cuenta
+ * acciones de borrado LOCALES — no tiene forma de saber que borrar UN proyecto "vacío" en su
+ * vista puede en realidad arrastrar (server-side, `/api/sync/push`) un subárbol entero con
+ * transcripciones reales. Esta función es el cimiento PURO del guard: decide si un borrado es
+ * "simple" (proyecto sin descendientes, comportamiento previo intacto, sin confirmación) o
+ * "en cascada" (tiene descendientes, requiere confirmación explícita del caller).
+ *
+ * Nota clave: "sin hijos" implica "sin transcripciones en descendientes" (no puede haber
+ * transcripciones en un descendiente que no existe) — por eso `hasChildren` alcanza para decidir
+ * si hace falta confirmación; no hace falta mirar transcripciones acá (esas se cuentan aparte,
+ * con I/O, en el caller — este módulo es puro).
+ *
+ * Reusa `collectProjectSubtreeIds` (única fuente de verdad del recorrido del árbol) en vez de
+ * reimplementar el recorrido.
+ */
+export function planProjectDeletion(rootId: string, projects: ProjectParentLink[]): ProjectDeletionPlan {
+  const subtreeIds = Array.from(collectProjectSubtreeIds(rootId, projects));
+  const childProjectCount = subtreeIds.length - 1;
+  return {
+    subtreeIds,
+    hasChildren: childProjectCount > 0,
+    childProjectCount,
+  };
+}
+
+/**
+ * true si el borrado puede proceder: proyectos sin descendientes siempre están autorizados
+ * (comportamiento previo, sin cambios); proyectos con descendientes solo si `confirmed` es true
+ * (el caller mandó explícitamente el id en `projects.cascadeDeletes`, ver contrato en
+ * `api/sync/push/route.ts`).
+ */
+export function isProjectDeletionAuthorized(plan: ProjectDeletionPlan, confirmed: boolean): boolean {
+  return !plan.hasChildren || confirmed;
+}
+
+// ---------------------------------------------------------------------------
+// A.4 Anti-ciclo al reasignar padre (usado por /api/sync/push)
 // ---------------------------------------------------------------------------
 
 /**

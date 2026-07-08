@@ -5,6 +5,8 @@ import {
   rollUpProjectCounts,
   collectProjectSubtreeIds,
   wouldCreateProjectCycle,
+  planProjectDeletion,
+  isProjectDeletionAuthorized,
   type ProjectTreeInput,
   type DriveTreeNode,
   type ProjectParentLink,
@@ -239,6 +241,76 @@ describe("collectProjectSubtreeIds", () => {
       { id: "b", parentProjectId: "a" },
     ];
     expect(Array.from(collectProjectSubtreeIds("a", links)).sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("planProjectDeletion", () => {
+  it("proyecto hoja (sin hijos): hasChildren false, subtreeIds solo el propio id", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "leaf", parentProjectId: "root" },
+    ];
+    const plan = planProjectDeletion("leaf", links);
+    expect(plan.hasChildren).toBe(false);
+    expect(plan.childProjectCount).toBe(0);
+    expect(plan.subtreeIds).toEqual(["leaf"]);
+  });
+
+  it("proyecto con hijos (árbol de 3 niveles): hasChildren true, cuenta agregada del subárbol completo", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "child", parentProjectId: "root" },
+      { id: "grandchild", parentProjectId: "child" },
+      { id: "other", parentProjectId: null },
+    ];
+    const plan = planProjectDeletion("root", links);
+    expect(plan.hasChildren).toBe(true);
+    expect(plan.childProjectCount).toBe(2); // child + grandchild, sin contar "other" ni el propio root
+    expect(Array.from(plan.subtreeIds).sort()).toEqual(["child", "grandchild", "root"]);
+  });
+
+  it("proyecto sin subproyectos (aunque tenga transcripciones propias) se trata como hoja", () => {
+    // La cantidad de transcripciones DIRECTAS del propio proyecto no afecta hasChildren: el
+    // criterio es exclusivamente "tiene proyectos descendientes" (ver doc del guard en tree.ts).
+    // Un proyecto sin hijos nunca puede tener transcripciones en DESCENDIENTES (no hay
+    // descendientes), así que sigue siendo un borrado simple sin confirmación.
+    const links: ProjectParentLink[] = [{ id: "solo", parentProjectId: null }];
+    const plan = planProjectDeletion("solo", links);
+    expect(plan.hasChildren).toBe(false);
+    expect(plan.subtreeIds).toEqual(["solo"]);
+  });
+
+  it("id que no está en la lista (ej. ya no activo) devuelve plan de hoja con solo ese id", () => {
+    const plan = planProjectDeletion("no-existe", []);
+    expect(plan.hasChildren).toBe(false);
+    expect(plan.subtreeIds).toEqual(["no-existe"]);
+  });
+});
+
+describe("isProjectDeletionAuthorized", () => {
+  it("un borrado sin descendientes siempre está autorizado, confirmado o no", () => {
+    const links: ProjectParentLink[] = [{ id: "leaf", parentProjectId: null }];
+    const plan = planProjectDeletion("leaf", links);
+    expect(isProjectDeletionAuthorized(plan, false)).toBe(true);
+    expect(isProjectDeletionAuthorized(plan, true)).toBe(true);
+  });
+
+  it("un borrado con descendientes SIN confirmar queda rechazado", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "child", parentProjectId: "root" },
+    ];
+    const plan = planProjectDeletion("root", links);
+    expect(isProjectDeletionAuthorized(plan, false)).toBe(false);
+  });
+
+  it("un borrado con descendientes CONFIRMADO queda autorizado", () => {
+    const links: ProjectParentLink[] = [
+      { id: "root", parentProjectId: null },
+      { id: "child", parentProjectId: "root" },
+    ];
+    const plan = planProjectDeletion("root", links);
+    expect(isProjectDeletionAuthorized(plan, true)).toBe(true);
   });
 });
 

@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getApiUser } from "@/lib/supabase/api";
 import { validateProjectName } from "@/lib/format";
-import { collectProjectSubtreeIds, wouldCreateProjectCycle, type ProjectParentLink } from "@/lib/drive/tree";
+import {
+  isProjectDeletionAuthorized,
+  planProjectDeletion,
+  wouldCreateProjectCycle,
+  type ProjectParentLink,
+} from "@/lib/drive/tree";
 import {
   buildProjectRow,
   getSchemaCompatSnapshot,
@@ -73,7 +78,11 @@ async function fetchActiveProjectParentLinksCompat(
  *
  * Body:
  * {
- *   projects?:       { upserts?: [{ id, name, icon?, description?, parent_project_id? }], deletes?: string[] },
+ *   projects?:       {
+ *     upserts?: [{ id, name, icon?, description?, parent_project_id? }],
+ *     deletes?: string[],
+ *     cascadeDeletes?: string[]
+ *   },
  *   transcriptions?: { upserts?: [{ id, title?, text?, description?, icon?, project_id? }], deletes?: string[] }
  * }
  *
@@ -93,6 +102,24 @@ async function fetchActiveProjectParentLinksCompat(
  * quedan huérfanos promovidos a raíz ni transcripciones "sueltas" a mitad de camino. Ver
  * `collectProjectSubtreeIds` en `src/lib/drive/tree.ts` (única fuente de verdad, también usada
  * por la papelera del server action `deleteProject`).
+ *
+ * Guard de confirmación (bug C1, pérdida silenciosa de datos): el cliente desktop ve los
+ * proyectos como lista PLANA — no conoce `parent_project_id` — así que su freno anti-borrado-
+ * masivo solo cuenta acciones LOCALES y no tiene forma de saber que borrar UN proyecto "vacío"
+ * en su vista puede en realidad arrastrar acá un subárbol entero con transcripciones reales, sin
+ * undo. Por eso `projects.deletes` YA NO cascadea sin más si el proyecto tiene descendientes:
+ * - Proyecto sin descendientes (hoja): se borra igual que siempre, sin cambios de comportamiento
+ *   ni necesidad de confirmar — cubre tanto clientes viejos como el caso normal de borrar una
+ *   carpeta vacía.
+ * - Proyecto CON descendientes: si su id además viene en `projects.cascadeDeletes` (confirmación
+ *   explícita del caller de que quiere el subárbol completo — la web la manda siempre desde su
+ *   propio flujo de borrado, que ya muestra el árbol al usuario), se cascadea igual que antes. Si
+ *   NO viene confirmado, no se borra nada de ese subárbol y se reporta un error en `errors[]` con
+ *   la cantidad de subproyectos/transcripciones en juego — el resto del batch sigue procesándose.
+ * Lógica pura del guard (`planProjectDeletion`/`isProjectDeletionAuthorized`) en
+ * `src/lib/drive/tree.ts`. `deleteProject` (server action de la web, `app/app/actions.ts`) NO
+ * pasa por este endpoint — sigue cascadeando directo contra Supabase sin este guard, porque la UI
+ * web ya muestra el árbol y el borrado ahí siempre es una decisión informada del usuario.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -204,7 +231,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ---- Proyectos: deletes (soft, en cascada al subárbol completo) ----
+    // ---- Proyectos: deletes (soft; cascadea al subárbol completo, con guard de confirmación
+    // para subárboles con descendientes — ver contrato en el comentario de cabecera) ----
+    const cascadeConfirmedIds = new Set(body.projects?.cascadeDeletes ?? []);
+    const projectDeletions: { id: string; deletedProjects: number; deletedTranscriptions: number }[] = [];
+
     for (const id of body.projects?.deletes ?? []) {
       try {
         // Compatibilidad de esquema: sin `parent_project_id` disponible no hay subárbol que
@@ -217,21 +248,50 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const subtreeIds = Array.from(collectProjectSubtreeIds(id, activeLinks));
+        const plan = planProjectDeletion(id, activeLinks);
 
-        const { error: tError } = await supabase
+        if (!isProjectDeletionAuthorized(plan, cascadeConfirmedIds.has(id))) {
+          // No se borra nada de este subárbol: se reporta cuántas filas quedan "en juego" para
+          // que el caller decida si confirma (`projects.cascadeDeletes`). Solo cuenta (sin
+          // I/O de borrado), el resto del batch sigue procesándose normalmente.
+          const { count: transcriptionCount, error: countErr } = await supabase
+            .from("transcriptions")
+            .select("id", { count: "exact", head: true })
+            .in("project_id", plan.subtreeIds)
+            .eq("user_id", user.id)
+            .is("deleted_at", null);
+          if (countErr) {
+            errors.push(`Borrar proyecto ${id}: ${countErr.message}`);
+            continue;
+          }
+          errors.push(
+            `El proyecto ${id} tiene ${plan.childProjectCount} subproyecto(s) y ${transcriptionCount ?? 0} ` +
+              `transcripción(es); confirmá el borrado desde la web.`
+          );
+          continue;
+        }
+
+        const { data: deletedTranscriptions, error: tError } = await supabase
           .from("transcriptions")
           .update({ deleted_at: now })
-          .in("project_id", subtreeIds)
-          .eq("user_id", user.id);
+          .in("project_id", plan.subtreeIds)
+          .eq("user_id", user.id)
+          .select("id");
         if (tError) errors.push(`Borrar transcripciones del proyecto ${id}: ${tError.message}`);
 
-        const { error } = await supabase
+        const { data: deletedProjects, error } = await supabase
           .from("projects")
           .update({ deleted_at: now })
-          .in("id", subtreeIds)
-          .eq("user_id", user.id);
+          .in("id", plan.subtreeIds)
+          .eq("user_id", user.id)
+          .select("id");
         if (error) errors.push(`Borrar proyecto ${id}: ${error.message}`);
+
+        projectDeletions.push({
+          id,
+          deletedProjects: deletedProjects?.length ?? 0,
+          deletedTranscriptions: deletedTranscriptions?.length ?? 0,
+        });
       } catch (err) {
         errors.push(`Borrar proyecto ${id}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -281,6 +341,7 @@ export async function POST(req: NextRequest) {
       serverTime: now,
       ok: errors.length === 0,
       errors,
+      projectDeletions,
     });
   } catch (err) {
     // Red de seguridad: cualquier excepción no prevista (ej. throw fuera del manejo
@@ -303,6 +364,9 @@ type PushBody = {
       parent_project_id?: string | null;
     }[];
     deletes?: string[];
+    /** Ids de `deletes` que el caller confirma explícitamente que pueden cascadear (tienen
+     *  descendientes). Ver contrato de guard de confirmación en el comentario de cabecera. */
+    cascadeDeletes?: string[];
   };
   transcriptions?: {
     upserts?: {
