@@ -1,8 +1,15 @@
 import Link from "next/link";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { buildProjectTree, rollUpProjectCounts } from "@/lib/drive/tree";
+import {
+  getSchemaCompatSnapshot,
+  isMissingColumnError,
+  markSchemaCompatResult,
+  shouldRedetectSchemaCompat,
+} from "@/lib/supabase/schema-compat";
 import { NewProjectButton } from "./new-project-button";
 import { ProjectTree } from "./project-tree";
 import { TranscriptionRow } from "./transcription-row";
@@ -19,6 +26,49 @@ type Transcription = {
 
 type Project = { id: string; name: string; icon: string; parent_project_id: string | null; sync_origin: string };
 
+/**
+ * Columnas de Drive-sync v2 (doc 10) en `projects`: si la migración `20260707130000_
+ * drive_sync_v2_foundation.sql` todavía no se corrió a mano en producción, el select completo
+ * devuelve `42703` y ANTES este código quedaba con `projectsData` vacío (dashboard sin
+ * proyectos). Ahora cae a la versión reducida y completa los campos por defecto — ver
+ * `src/lib/supabase/schema-compat.ts`.
+ */
+async function fetchProjectsCompat(supabase: SupabaseClient): Promise<Project[]> {
+  const now = Date.now();
+  const runQuery = (columns: string) =>
+    supabase.from("projects").select(columns).is("deleted_at", null).order("created_at", { ascending: true });
+
+  const cached = getSchemaCompatSnapshot();
+  const useReducedDirectly = cached.available === false && !shouldRedetectSchemaCompat(now);
+
+  if (useReducedDirectly) {
+    const { data } = await runQuery("id, name, icon");
+    return withDefaultDriveSyncFields(data);
+  }
+
+  const { data, error } = await runQuery("id, name, icon, parent_project_id, sync_origin");
+  if (!error) {
+    markSchemaCompatResult(true, now);
+    return (data ?? []) as unknown as Project[];
+  }
+
+  if (isMissingColumnError(error)) {
+    markSchemaCompatResult(false, now);
+    const retry = await runQuery("id, name, icon");
+    return withDefaultDriveSyncFields(retry.data);
+  }
+
+  return [];
+}
+
+function withDefaultDriveSyncFields(rows: unknown): Project[] {
+  return ((rows ?? []) as { id: string; name: string; icon: string }[]).map((p) => ({
+    ...p,
+    parent_project_id: null,
+    sync_origin: "local",
+  }));
+}
+
 export default async function Dashboard({
   searchParams,
 }: {
@@ -27,16 +77,10 @@ export default async function Dashboard({
   const { project: filter } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: projectsData }, { data: countRows }] = await Promise.all([
-    supabase
-      .from("projects")
-      .select("id, name, icon, parent_project_id, sync_origin")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true }),
+  const [projects, { data: countRows }] = await Promise.all([
+    fetchProjectsCompat(supabase),
     supabase.from("transcriptions").select("project_id").is("deleted_at", null),
   ]);
-
-  const projects = (projectsData ?? []) as Project[];
 
   // Conteos por proyecto + "sin proyecto" + total.
   const counts = new Map<string, number>();

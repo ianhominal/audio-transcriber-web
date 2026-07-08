@@ -24,6 +24,12 @@ import {
 } from "@/lib/drive/reconcile";
 import { computeDriveScopeProjectIds, buildProjectDriveFolderMap, type ProjectLite } from "@/lib/drive/scope";
 import { parseMarkdownExport } from "@/lib/format";
+import {
+  getSchemaCompatSnapshot,
+  isMissingColumnError,
+  markSchemaCompatResult,
+  shouldRedetectSchemaCompat,
+} from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
 
@@ -158,6 +164,40 @@ function conflictFileName(fileName: string): string {
   return fileName.endsWith(".md") ? `${fileName.slice(0, -3)} (conflicto).md` : `${fileName} (conflicto)`;
 }
 
+/** Trae `id, name, parent_project_id` de `projects`, con fallback a `id, name` (sin jerarquía)
+ * si `parent_project_id` todavía no existe en el esquema real. Ver cabecera de la sección 2 más
+ * abajo y `src/lib/supabase/schema-compat.ts`. */
+async function fetchProjectRowsCompat(supabase: SupabaseClient, userId: string): Promise<ProjectRow[]> {
+  const now = Date.now();
+  const runQuery = (columns: string) => supabase.from("projects").select(columns).eq("user_id", userId);
+
+  const cached = getSchemaCompatSnapshot();
+  const useReducedDirectly = cached.available === false && !shouldRedetectSchemaCompat(now);
+
+  if (useReducedDirectly) {
+    const { data } = await runQuery("id, name");
+    return withNullParent(data);
+  }
+
+  const { data, error } = await runQuery("id, name, parent_project_id");
+  if (!error) {
+    markSchemaCompatResult(true, now);
+    return (data ?? []) as unknown as ProjectRow[];
+  }
+
+  if (isMissingColumnError(error)) {
+    markSchemaCompatResult(false, now);
+    const retry = await runQuery("id, name");
+    return withNullParent(retry.data);
+  }
+
+  return [];
+}
+
+function withNullParent(rows: unknown): ProjectRow[] {
+  return ((rows ?? []) as { id: string; name: string }[]).map((p) => ({ ...p, parent_project_id: null }));
+}
+
 async function syncOneUser(
   supabase: SupabaseClient,
   conn: DriveConnectionRow,
@@ -209,11 +249,11 @@ async function syncOneUser(
   }));
 
   // ---- 2. Proyectos del usuario: resuelven la jerarquía y el ACOTADO (doc 10) ----
-  const { data: projectsRaw } = await supabase
-    .from("projects")
-    .select("id, name, parent_project_id")
-    .eq("user_id", conn.user_id);
-  const projectRows = (projectsRaw ?? []) as ProjectRow[];
+  // Compatibilidad de esquema (Drive-sync v2, ver src/lib/supabase/schema-compat.ts): si
+  // `parent_project_id` todavía no existe en producción, no hay jerarquía que resolver — cada
+  // proyecto queda sin padre, así que el ACOTADO solo deja pasar las raíces conectadas
+  // directamente en `drive_folders` (sin subárbol), en vez de que el tick entero falle.
+  const projectRows = await fetchProjectRowsCompat(supabase, conn.user_id);
   const projectNameById = new Map(projectRows.map((p) => [p.id, p.name]));
   const projectsLite: ProjectLite[] = projectRows.map((p) => ({ id: p.id, parentProjectId: p.parent_project_id }));
 

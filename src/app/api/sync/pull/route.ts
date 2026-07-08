@@ -1,8 +1,80 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getApiUser } from "@/lib/supabase/api";
 import { AUDIO_BUCKET } from "@/lib/storage";
+import {
+  getSchemaCompatSnapshot,
+  isMissingColumnError,
+  markSchemaCompatResult,
+  shouldRedetectSchemaCompat,
+} from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
+
+// Columnas de Drive-sync v2 (doc 10): agregadas por la migración
+// `20260707130000_drive_sync_v2_foundation.sql`, que en producción se corre A MANO — el código
+// puede quedar desplegado antes de que existan. Ver `src/lib/supabase/schema-compat.ts` para el
+// patrón expand/contract completo (detección por intento real + cache con TTL).
+const PROJECT_COLUMNS_FULL =
+  "id, name, icon, description, parent_project_id, sync_origin, created_at, updated_at, deleted_at";
+const PROJECT_COLUMNS_REDUCED = "id, name, icon, description, created_at, updated_at, deleted_at";
+
+type ProjectRow = {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  parent_project_id?: string | null;
+  sync_origin?: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+/** Completa `parent_project_id`/`sync_origin` con sus valores por defecto cuando la consulta se
+ * ejecutó en modo reducido (columnas no disponibles) — mismo comportamiento que un cliente
+ * desktop viejo vería con un proyecto "de toda la vida". */
+function withDefaultDriveSyncFields(rows: ProjectRow[]): Required<ProjectRow>[] {
+  return rows.map((p) => ({
+    ...p,
+    parent_project_id: p.parent_project_id ?? null,
+    sync_origin: p.sync_origin ?? "local",
+  })) as Required<ProjectRow>[];
+}
+
+async function fetchProjectsCompat(supabase: SupabaseClient, userId: string, since: string | null) {
+  const now = Date.now();
+  const runQuery = (columns: string) => {
+    let q = supabase.from("projects").select(columns).eq("user_id", userId);
+    if (since) q = q.gt("updated_at", since);
+    return q;
+  };
+
+  const cached = getSchemaCompatSnapshot();
+  const useReducedDirectly = cached.available === false && !shouldRedetectSchemaCompat(now);
+
+  if (useReducedDirectly) {
+    const { data, error } = await runQuery(PROJECT_COLUMNS_REDUCED);
+    return { data: error ? null : withDefaultDriveSyncFields((data ?? []) as unknown as ProjectRow[]), error };
+  }
+
+  const { data, error } = await runQuery(PROJECT_COLUMNS_FULL);
+  if (!error) {
+    markSchemaCompatResult(true, now);
+    return { data: (data ?? []) as unknown as ProjectRow[], error: null };
+  }
+
+  if (isMissingColumnError(error)) {
+    markSchemaCompatResult(false, now);
+    const retry = await runQuery(PROJECT_COLUMNS_REDUCED);
+    return {
+      data: retry.error ? null : withDefaultDriveSyncFields((retry.data ?? []) as unknown as ProjectRow[]),
+      error: retry.error,
+    };
+  }
+
+  return { data: null, error };
+}
 
 /**
  * Sync pull: devuelve proyectos y transcripciones del usuario cambiados desde `since`
@@ -17,13 +89,6 @@ export async function GET(req: NextRequest) {
     const since = req.nextUrl.searchParams.get("since");
     const serverTime = new Date().toISOString();
 
-    let projectsQuery = supabase
-      .from("projects")
-      // parent_project_id + sync_origin (Drive-sync v2, doc 10): agregado backward-compatible —
-      // un cliente desktop viejo que no los conoce simplemente los ignora en el JSON.
-      .select("id, name, icon, description, parent_project_id, sync_origin, created_at, updated_at, deleted_at")
-      .eq("user_id", user.id);
-
     let transcriptionsQuery = supabase
       .from("transcriptions")
       .select(
@@ -32,12 +97,11 @@ export async function GET(req: NextRequest) {
       .eq("user_id", user.id);
 
     if (since) {
-      projectsQuery = projectsQuery.gt("updated_at", since);
       transcriptionsQuery = transcriptionsQuery.gt("updated_at", since);
     }
 
     const [{ data: projects, error: pErr }, { data: transcriptions, error: tErr }] = await Promise.all([
-      projectsQuery,
+      fetchProjectsCompat(supabase, user.id, since),
       transcriptionsQuery,
     ]);
 

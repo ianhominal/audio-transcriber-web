@@ -2,9 +2,62 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { validateProjectName } from "@/lib/format";
-import { collectProjectSubtreeIds } from "@/lib/drive/tree";
+import { collectProjectSubtreeIds, type ProjectParentLink } from "@/lib/drive/tree";
+import {
+  getSchemaCompatSnapshot,
+  isMissingColumnError,
+  markSchemaCompatResult,
+  shouldRedetectSchemaCompat,
+} from "@/lib/supabase/schema-compat";
+
+/**
+ * Columnas de Drive-sync v2 en `projects` (ver `src/lib/supabase/schema-compat.ts`): si
+ * `parent_project_id` todavía no existe en producción, no hay subárbol que calcular — el
+ * borrado sigue funcionando, acotado al propio proyecto (comportamiento previo a Drive-sync v2)
+ * en vez de fallar por completo como pasaba antes (la query fallaba y `deleteProject` devolvía
+ * error sin borrar nada).
+ */
+async function fetchActiveProjectParentLinksCompat(
+  supabase: SupabaseClient
+): Promise<{ links: ProjectParentLink[]; error: { message: string } | null }> {
+  const now = Date.now();
+  const runQuery = (columns: string) => supabase.from("projects").select(columns).is("deleted_at", null);
+
+  const cached = getSchemaCompatSnapshot();
+  const useReducedDirectly = cached.available === false && !shouldRedetectSchemaCompat(now);
+
+  if (useReducedDirectly) {
+    const { data, error } = await runQuery("id");
+    return {
+      links: ((data ?? []) as unknown as { id: string }[]).map((p) => ({ id: p.id, parentProjectId: null })),
+      error,
+    };
+  }
+
+  const { data, error } = await runQuery("id, parent_project_id");
+  if (!error) {
+    markSchemaCompatResult(true, now);
+    const links = ((data ?? []) as unknown as { id: string; parent_project_id: string | null }[]).map((p) => ({
+      id: p.id,
+      parentProjectId: p.parent_project_id,
+    }));
+    return { links, error: null };
+  }
+
+  if (isMissingColumnError(error)) {
+    markSchemaCompatResult(false, now);
+    const retry = await runQuery("id");
+    return {
+      links: ((retry.data ?? []) as unknown as { id: string }[]).map((p) => ({ id: p.id, parentProjectId: null })),
+      error: retry.error,
+    };
+  }
+
+  return { links: [], error };
+}
 
 /** Devuelve el usuario autenticado o corta con redirect a /login. */
 async function requireUser() {
@@ -97,18 +150,10 @@ export async function deleteProject(id: string): Promise<ActionResult> {
   // las transcripciones de cada uno de esos proyectos, de forma consistente — ya no quedan
   // subproyectos huérfanos promovidos a raíz. Misma lógica pura que usa /api/sync/push
   // (`collectProjectSubtreeIds` en src/lib/drive/tree.ts) para que web y desktop se comporten igual.
-  const { data: activeProjects, error: fetchError } = await supabase
-    .from("projects")
-    .select("id, parent_project_id")
-    .is("deleted_at", null);
+  const { links: activeLinks, error: fetchError } = await fetchActiveProjectParentLinksCompat(supabase);
   if (fetchError) return { ok: false, error: "No se pudo borrar el proyecto." };
 
-  const subtreeIds = Array.from(
-    collectProjectSubtreeIds(
-      id,
-      (activeProjects ?? []).map((p) => ({ id: p.id, parentProjectId: p.parent_project_id }))
-    )
-  );
+  const subtreeIds = Array.from(collectProjectSubtreeIds(id, activeLinks));
 
   const now = new Date().toISOString();
   const { error: transcriptionsError } = await supabase

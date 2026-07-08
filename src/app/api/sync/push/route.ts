@@ -1,9 +1,66 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getApiUser } from "@/lib/supabase/api";
 import { validateProjectName } from "@/lib/format";
 import { collectProjectSubtreeIds, wouldCreateProjectCycle, type ProjectParentLink } from "@/lib/drive/tree";
+import {
+  buildProjectRow,
+  getSchemaCompatSnapshot,
+  isMissingColumnError,
+  markSchemaCompatResult,
+  shouldRedetectSchemaCompat,
+} from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
+
+/**
+ * Columnas de Drive-sync v2 (doc 10): agregadas por la migración
+ * `20260707130000_drive_sync_v2_foundation.sql`, que en producción se corre A MANO — el código
+ * puede quedar desplegado antes de que existan en el esquema real. Ver
+ * `src/lib/supabase/schema-compat.ts` para el patrón expand/contract (detección por intento
+ * real + cache con TTL, compartido con /api/sync/pull).
+ *
+ * Trae `id, parent_project_id` de los proyectos ACTIVOS del usuario, con fallback automático a
+ * `id` solo si la columna todavía no existe. Sin la columna, no hay jerarquía que validar: se
+ * devuelve la lista de ids con `parentProjectId: null` para todos (mismo comportamiento que
+ * tenía el código ANTES de Drive-sync v2).
+ */
+async function fetchActiveProjectParentLinksCompat(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<{ links: ProjectParentLink[]; columnsAvailable: boolean; error: { message: string } | null }> {
+  const now = Date.now();
+  const runQuery = (columns: string) =>
+    supabase.from("projects").select(columns).eq("user_id", userId).is("deleted_at", null);
+
+  const cached = getSchemaCompatSnapshot();
+  const useReducedDirectly = cached.available === false && !shouldRedetectSchemaCompat(now);
+
+  if (useReducedDirectly) {
+    const { data, error } = await runQuery("id");
+    const links = ((data ?? []) as unknown as { id: string }[]).map((p) => ({ id: p.id, parentProjectId: null }));
+    return { links, columnsAvailable: false, error };
+  }
+
+  const { data, error } = await runQuery("id, parent_project_id");
+  if (!error) {
+    markSchemaCompatResult(true, now);
+    const links = ((data ?? []) as unknown as { id: string; parent_project_id: string | null }[]).map((p) => ({
+      id: p.id,
+      parentProjectId: p.parent_project_id,
+    }));
+    return { links, columnsAvailable: true, error: null };
+  }
+
+  if (isMissingColumnError(error)) {
+    markSchemaCompatResult(false, now);
+    const retry = await runQuery("id");
+    const links = ((retry.data ?? []) as unknown as { id: string }[]).map((p) => ({ id: p.id, parentProjectId: null }));
+    return { links, columnsAvailable: false, error: retry.error };
+  }
+
+  return { links: [], columnsAvailable: cached.available ?? true, error };
+}
 
 /**
  * Sync push: el cliente desktop envía cambios de metadata.
@@ -58,18 +115,19 @@ export async function POST(req: NextRequest) {
       // `parent_project_id`. Se actualiza en memoria a medida que se procesan upserts exitosos,
       // para soportar jerarquía nueva de punta a punta dentro del mismo push (padres antes que
       // hijos, ver contrato documentado arriba).
-      const { data: existingProjects, error: existingErr } = await supabase
-        .from("projects")
-        .select("id, parent_project_id")
-        .eq("user_id", user.id)
-        .is("deleted_at", null);
+      //
+      // Compatibilidad de esquema (Drive-sync v2, ver src/lib/supabase/schema-compat.ts): si la
+      // columna `parent_project_id` todavía no existe en producción (migración no corrida a
+      // mano todavía), `columnsAvailable` viene en `false` y TODA la jerarquía se ignora —
+      // comportamiento idéntico al de antes de Drive-sync v2, sin romper el resto del push.
+      const {
+        links: parentLinks,
+        columnsAvailable,
+        error: existingErr,
+      } = await fetchActiveProjectParentLinksCompat(supabase, user.id);
       if (existingErr) {
         errors.push(`No se pudo validar la jerarquía de proyectos: ${existingErr.message}`);
       }
-      const parentLinks: ProjectParentLink[] = (existingProjects ?? []).map((p) => ({
-        id: p.id,
-        parentProjectId: p.parent_project_id,
-      }));
       const parentById = new Map(parentLinks.map((p) => [p.id, p] as const));
 
       for (const p of body.projects?.upserts ?? []) {
@@ -80,7 +138,7 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          const insert: Record<string, unknown> = {
+          const baseRow = {
             id: p.id,
             user_id: user.id,
             name: parsed.value,
@@ -91,11 +149,20 @@ export async function POST(req: NextRequest) {
           };
 
           let resolvedParentId: string | null | undefined; // undefined = no se pudo resolver (error)
-          if (p.parent_project_id === undefined) {
+          let parentProjectIdForRow: string | null | undefined; // undefined = no incluir la clave
+
+          if (!columnsAvailable) {
+            // Columna no disponible todavía: se ignora cualquier `parent_project_id` que haya
+            // mandado el cliente (no se valida ni se reporta como error) y no se incluye esa
+            // clave en el insert — comportamiento idéntico al de antes de Drive-sync v2.
+            resolvedParentId = undefined;
+            parentProjectIdForRow = undefined;
+          } else if (p.parent_project_id === undefined) {
             resolvedParentId = undefined; // no tocar el campo
+            parentProjectIdForRow = undefined;
           } else if (p.parent_project_id === null) {
-            insert.parent_project_id = null;
             resolvedParentId = null;
+            parentProjectIdForRow = null;
           } else {
             const parentId = p.parent_project_id;
             if (!parentById.has(parentId)) {
@@ -103,10 +170,12 @@ export async function POST(req: NextRequest) {
             } else if (wouldCreateProjectCycle(p.id, parentId, parentLinks)) {
               errors.push(`Proyecto ${p.id}: parent_project_id "${parentId}" generaría un ciclo.`);
             } else {
-              insert.parent_project_id = parentId;
               resolvedParentId = parentId;
+              parentProjectIdForRow = parentId;
             }
           }
+
+          const insert = buildProjectRow(baseRow, { parent_project_id: parentProjectIdForRow }, columnsAvailable);
 
           const { error } = await supabase.from("projects").upsert(insert);
           if (error) {
@@ -138,22 +207,17 @@ export async function POST(req: NextRequest) {
     // ---- Proyectos: deletes (soft, en cascada al subárbol completo) ----
     for (const id of body.projects?.deletes ?? []) {
       try {
-        const { data: activeProjects, error: fetchErr } = await supabase
-          .from("projects")
-          .select("id, parent_project_id")
-          .eq("user_id", user.id)
-          .is("deleted_at", null);
+        // Compatibilidad de esquema: sin `parent_project_id` disponible no hay subárbol que
+        // calcular (todos los proyectos son "raíz" a los efectos del borrado) — el borrado
+        // sigue funcionando, solo que acotado al propio proyecto (comportamiento previo a
+        // Drive-sync v2), en vez de fallar por completo.
+        const { links: activeLinks, error: fetchErr } = await fetchActiveProjectParentLinksCompat(supabase, user.id);
         if (fetchErr) {
           errors.push(`Borrar proyecto ${id}: ${fetchErr.message}`);
           continue;
         }
 
-        const subtreeIds = Array.from(
-          collectProjectSubtreeIds(
-            id,
-            (activeProjects ?? []).map((p) => ({ id: p.id, parentProjectId: p.parent_project_id }))
-          )
-        );
+        const subtreeIds = Array.from(collectProjectSubtreeIds(id, activeLinks));
 
         const { error: tError } = await supabase
           .from("transcriptions")
