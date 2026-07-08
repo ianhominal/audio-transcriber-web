@@ -165,15 +165,21 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          const baseRow = {
+          // `icon` y `description` existen siempre en el esquema, pero solo deben viajar en el
+          // upsert si el cliente los mandó explícitamente. Un cliente que no maneja esos campos
+          // (ej. el desktop, que serializa con JsonIgnore-WhenWritingNull) los omite → NO se tocan,
+          // para no pisar el emoji/contexto que el usuario editó en la web. Mismo criterio que
+          // `parent_project_id`: una clave ausente en el payload de upsert no se incluye en el
+          // UPDATE, así que conserva el valor existente en la fila.
+          const baseRow: Record<string, unknown> = {
             id: p.id,
             user_id: user.id,
             name: parsed.value,
             title: parsed.value,
-            icon: (p.icon ?? "").slice(0, 8),
-            description: p.description ?? "",
             deleted_at: null,
           };
+          if (p.icon !== undefined) baseRow.icon = (p.icon ?? "").slice(0, 8);
+          if (p.description !== undefined) baseRow.description = p.description ?? "";
 
           let resolvedParentId: string | null | undefined; // undefined = no se pudo resolver (error)
           let parentProjectIdForRow: string | null | undefined; // undefined = no incluir la clave
