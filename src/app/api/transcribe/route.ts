@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { randomUUID } from "crypto";
 import { getApiUser } from "@/lib/supabase/api";
-import { AUDIO_BUCKET, audioExtension, buildAudioObjectPath } from "@/lib/storage";
+import {
+  AUDIO_BUCKET,
+  audioExtension,
+  buildAudioObjectPath,
+  uploadWithRetry,
+  UPLOAD_MAX_ATTEMPTS,
+} from "@/lib/storage";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 import { resolveGroqModel } from "@/lib/transcribe/model";
 
@@ -135,15 +142,39 @@ export async function POST(req: NextRequest) {
   try {
     const ext = audioExtension(audioName);
     const path = buildAudioObjectPath(user.id, randomUUID(), ext);
-    const { error: upErr } = await supabase.storage
-      .from(AUDIO_BUCKET)
-      .upload(path, file, {
+    // Reintenta ante fallas transitorias (red, timeouts) con backoff: 3 intentos totales.
+    // Mismo path en cada intento — es seguro porque `upsert: false` y el intento previo
+    // falló, así que el objeto nunca llegó a crearse.
+    const { error: upErr, attempts } = await uploadWithRetry(() =>
+      supabase.storage.from(AUDIO_BUCKET).upload(path, file, {
         contentType: file.type || "application/octet-stream",
         upsert: false,
+      })
+    );
+    if (!upErr) {
+      audioPath = path;
+    } else {
+      // Best-effort: no bloqueamos la respuesta, pero esto NO puede desaparecer en
+      // silencio — sin este log era imposible saber por qué un audio se perdía
+      // (bucket inexistente, RLS, etc.) sin entrar al dashboard de Supabase.
+      console.error("[transcribe] audio upload failed", {
+        path,
+        userId: user.id,
+        error: upErr.message,
+        name: upErr.name,
+        attempts,
       });
-    if (!upErr) audioPath = path;
-  } catch {
-    /* seguir sin audio */
+      Sentry.captureException(upErr, {
+        extra: { path, userId: user.id, stage: "audio-upload", attempts },
+      });
+    }
+  } catch (err) {
+    // Llegar acá significa que `uploadWithRetry` agotó los UPLOAD_MAX_ATTEMPTS intentos y el
+    // último también lanzó una excepción (no un `error` devuelto por el SDK).
+    console.error("[transcribe] audio upload threw", err, { attempts: UPLOAD_MAX_ATTEMPTS });
+    Sentry.captureException(err, {
+      extra: { userId: user.id, stage: "audio-upload", attempts: UPLOAD_MAX_ATTEMPTS },
+    });
   }
 
   // 4) Guardar la transcripción. Acepta un proyecto destino y un título opcionales (el título lo
@@ -158,7 +189,7 @@ export async function POST(req: NextRequest) {
   const title = titleRaw.trim().slice(0, 120);
   let savedId: string | null = null;
   try {
-    const { data: inserted } = await supabase
+    const { data: inserted, error: insertErr } = await supabase
       .from("transcriptions")
       .insert({
         user_id: user.id,
@@ -173,10 +204,21 @@ export async function POST(req: NextRequest) {
       })
       .select("id")
       .single();
+    if (insertErr) {
+      console.error("[transcribe] transcription insert failed", {
+        userId: user.id,
+        error: insertErr.message,
+      });
+      Sentry.captureException(insertErr, {
+        extra: { userId: user.id, stage: "transcription-insert" },
+      });
+    }
     savedId = inserted?.id ?? null;
-  } catch {
-    /* no bloquear la respuesta por un error de guardado */
+  } catch (err) {
+    // No bloqueamos la respuesta por un error de guardado, pero lo dejamos visible.
+    console.error("[transcribe] transcription insert threw", err);
+    Sentry.captureException(err, { extra: { userId: user.id, stage: "transcription-insert" } });
   }
 
-  return NextResponse.json({ text, id: savedId });
+  return NextResponse.json({ text, id: savedId, audioStored: audioPath !== null });
 }

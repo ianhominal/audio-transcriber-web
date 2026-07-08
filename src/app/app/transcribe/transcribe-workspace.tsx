@@ -320,6 +320,11 @@ export function TranscribeWorkspace({
     // Procesar en serie (respeta la cuota de Groq y da progreso claro).
     let okCount = 0;
     let failCount = 0;
+    // Transcripciones que se guardaron bien pero cuyo audio no se pudo subir a Storage (best-effort
+    // con reintento en el server, ver /api/transcribe). No es un error de la transcripción en sí
+    // (el texto está a salvo), así que no cuenta como `failCount` — se avisa aparte, una sola vez
+    // por lote, para no tapar al usuario de toasts si sube varios audios juntos.
+    let audioMissingCount = 0;
     for (const item of toProcess) {
       // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app.
       if (item.file.size > WEB_MAX_BYTES) {
@@ -349,6 +354,7 @@ export function TranscribeWorkspace({
           resultId: data.id ?? undefined,
         });
         okCount++;
+        if (!data.duplicate && data.audioStored === false) audioMissingCount++;
       } catch (e) {
         patch(item.key, { status: "error", error: e instanceof Error ? e.message : "Error." });
         failCount++;
@@ -362,6 +368,17 @@ export function TranscribeWorkspace({
     }
     if (failCount > 0) {
       toast(`${failCount} audio${failCount > 1 ? "s" : ""} no se pudo${failCount > 1 ? "ieron" : ""} transcribir.`, "error");
+    }
+    // Aviso no bloqueante: el texto se guardó igual, pero el audio original no — ver comentario en
+    // `audioMissingCount` más arriba. Usa el mismo mecanismo de toasts que el resto del flujo (sin
+    // agregar ninguna librería nueva), con tono "info" porque no es un error de la operación.
+    if (audioMissingCount > 0) {
+      toast(
+        audioMissingCount === 1
+          ? "Se guardó la transcripción, pero el audio no se pudo subir. Podés volver a subir el audio más tarde."
+          : `Se guardaron ${audioMissingCount} transcripciones, pero sus audios no se pudieron subir. Podés volver a subirlos más tarde.`,
+        "info"
+      );
     }
     router.refresh(); // que el dashboard vea las nuevas
   }
