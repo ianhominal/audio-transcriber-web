@@ -1,10 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+const MENU_WIDTH = 192; // w-48 (12rem)
+const VIEWPORT_MARGIN = 8;
 
 /**
  * Botón "⋯" con un popover. `children` es una render-prop que recibe `close`
  * para cerrar el menú desde cada opción.
+ *
+ * El menú se renderiza en un portal a `document.body` con `position: fixed`, calculando su
+ * posición a partir del botón. Esto es necesario porque este componente se usa dentro de
+ * contenedores con `overflow-y-auto` (el sidebar de proyectos, doc del bug de recorte): un
+ * `position: absolute`/`fixed` normal igual queda recortado por el `overflow` del ancestro aunque
+ * tenga mayor `z-index` — solo escapar del árbol del DOM vía portal evita el recorte.
  */
 export function IconMenu({
   children,
@@ -14,19 +24,63 @@ export function IconMenu({
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+  function close() {
+    setOpen(false);
+    setCoords(null);
+  }
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function reposition() {
+      const btn = btnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const menuHeight = menuRef.current?.offsetHeight ?? 0;
+
+      let left = rect.right - MENU_WIDTH;
+      left = Math.max(VIEWPORT_MARGIN, Math.min(left, window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN));
+
+      let top = rect.bottom + 4;
+      if (menuHeight && top + menuHeight > window.innerHeight - VIEWPORT_MARGIN) {
+        // No entra debajo del botón: lo mostramos arriba en su lugar.
+        top = Math.max(VIEWPORT_MARGIN, rect.top - menuHeight - 4);
+      }
+      setCoords({ top, left });
     }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+
+    // Primer cálculo (posiciona fuera de pantalla hasta medir la altura real del menú).
+    reposition();
+
+    function onPointerDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      close();
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") close();
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={(e) => {
           e.preventDefault();
@@ -40,14 +94,24 @@ export function IconMenu({
       >
         ⋯
       </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 z-30 mt-1 w-48 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
-        >
-          {children(() => setOpen(false))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{
+              position: "fixed",
+              top: coords?.top ?? -9999,
+              left: coords?.left ?? -9999,
+              width: MENU_WIDTH,
+              visibility: coords ? "visible" : "hidden",
+            }}
+            className="z-30 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
+          >
+            {children(close)}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

@@ -160,7 +160,7 @@ export default async function Dashboard({
           <p className="mb-2 px-1.5 pt-0.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Proyectos
           </p>
-          <nav className="max-h-[65vh] space-y-0.5 overflow-y-auto pr-0.5">
+          <nav className="max-h-[65vh] min-h-[10rem] space-y-0.5 overflow-y-auto pr-0.5">
             <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
             <ProjectTree
               projects={projectsFull}
