@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
 import { getDriveConnectionStatusCompat } from "@/lib/drive/connection-status-compat";
+import { getUserSettings } from "@/lib/settings/user-settings";
 import { DriveFolderConnect } from "./drive-folder-connect";
+import { TranscriptionDefaultsSection } from "./transcription-defaults";
 
 const DRIVE_STATUS_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Conectado con Google Drive." },
@@ -33,7 +35,10 @@ export default async function AjustesPage({
   // `status` distingue conexión ACTIVA de token revocado por Google (el usuario existe en
   // `drive_connections` pero ya no sirve) — ver migración `20260707140000_drive_connection_status.sql`
   // y `src/lib/drive/connection-status-compat.ts` (degrada a 'active' si la migración no corrió).
-  const connectionStatus = user ? await getDriveConnectionStatusCompat(supabase, user.id) : null;
+  // Independiente de los defaults de transcripción — se piden en paralelo, no encadenados.
+  const [connectionStatus, transcriptionDefaults] = user
+    ? await Promise.all([getDriveConnectionStatusCompat(supabase, user.id), getUserSettings(supabase, user.id)])
+    : [null, null];
   const isConnected = connectionStatus !== null;
   const isRevoked = connectionStatus === "revoked";
 
@@ -56,6 +61,12 @@ export default async function AjustesPage({
           <span aria-hidden="true">{message.tone === "ok" ? "✓" : "✕"}</span>
           <span>{message.text}</span>
         </div>
+      )}
+
+      {transcriptionDefaults && (
+        <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+          <TranscriptionDefaultsSection initialDefaults={transcriptionDefaults} />
+        </section>
       )}
 
       <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">

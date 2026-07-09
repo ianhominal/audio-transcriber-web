@@ -15,6 +15,9 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
+import { useTranscriptionDefaults } from "@/lib/settings/use-transcription-defaults";
+import { useOverridableDefault } from "@/lib/settings/use-overridable-default";
+import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
 
 // Formatos que Groq/Whisper acepta nativamente (mp4/mpeg incluidos: extrae el audio del video).
 const SUPPORTED = [
@@ -65,28 +68,52 @@ const nextKey = () => `f${++counter}`;
 export function TranscribeWorkspace({
   projects,
   initialProject = "",
+  initialDefaults,
 }: {
   projects: Project[];
   initialProject?: string;
+  initialDefaults?: TranscriptionDefaults;
 }) {
   const router = useRouter();
   const { show: toast } = useToast();
   const [destino, setDestino] = useState<string>(initialProject); // "" | projectId | "__new__"
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("📁");
-  // Idioma: lazy initializer (no `useEffect` + `setState` en mount, que dispara
-  // `react-hooks/set-state-in-effect`) — lee la última preferencia persistida en el navegador
-  // directo al inicializar el estado. `typeof window` guard porque el initializer también corre
-  // en el render de servidor (componente "use client" igual se renderiza en SSR).
-  const [language, setLanguage] = useState<string>(() =>
-    typeof window !== "undefined" ? localStorage.getItem("transcribe:language") || "es" : "es"
-  );
-  const [model, setModel] = useState("whisper-large-v3-turbo");
 
-  const changeLanguage = (value: string) => {
-    setLanguage(value);
-    localStorage.setItem("transcribe:language", value);
+  // Defaults persistentes de transcripción (Motor/Calidad/Idioma, ver ROADMAP.md ítem F1) +
+  // override puntual: `useOverridableDefault` da, por campo, el valor efectivo (override si el
+  // usuario tocó ESE selector para esta tanda, si no el default persistido), si coincide con el
+  // default y las acciones restaurar/fijar-como-default — sin duplicar esa tripleta de estado por
+  // cada selector. Ningún `useEffect` de sincronización: cuando el default revalida en background
+  // (ver `useTranscriptionDefaults`) el nuevo valor fluye solo mientras no haya override activo.
+  // Reemplaza el lazy-initializer que antes leía `localStorage.getItem("transcribe:language")`
+  // directo: `useTranscriptionDefaults` ya lee esa clave como fallback de compat (ver
+  // `src/lib/settings/local-cache.ts`), así que ningún usuario pierde su idioma elegido.
+  const { defaults, save: saveDefaults } = useTranscriptionDefaults(initialDefaults);
+  const languageField = useOverridableDefault(defaults.language, (value) => saveDefaults({ language: value }));
+  const qualityField = useOverridableDefault(defaults.quality, (value) => saveDefaults({ quality: value }));
+
+  const language = languageField.value;
+  const model = qualityField.value;
+
+  const setLanguageAsDefault = async () => {
+    try {
+      await languageField.setAsDefault();
+      toast("Idioma fijado como default.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "No se pudo fijar el default.", "error");
+    }
   };
+
+  const setQualityAsDefault = async () => {
+    try {
+      await qualityField.setAsDefault();
+      toast("Calidad fijada como default.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "No se pudo fijar el default.", "error");
+    }
+  };
+
   const [items, setItems] = useState<Item[]>([]);
   const [running, setRunning] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -437,24 +464,36 @@ export function TranscribeWorkspace({
             <span className="mb-1 font-semibold text-tertiary">Idioma</span>
             <select
               value={language}
-              onChange={(e) => changeLanguage(e.target.value)}
+              onChange={(e) => languageField.change(e.target.value)}
               className="rounded-lg border border-border-strong px-3 py-2 focus:border-accent"
             >
               <option value="es">Español</option>
               <option value="en">Inglés</option>
               <option value="auto">Automático</option>
             </select>
+            <DefaultAffordance
+              isDefault={languageField.isDefault}
+              saving={languageField.saving}
+              onRestore={languageField.restore}
+              onSetDefault={setLanguageAsDefault}
+            />
           </label>
           <label className="flex flex-col text-sm">
             <span className="mb-1 font-semibold text-tertiary">Calidad</span>
             <select
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => qualityField.change(e.target.value)}
               className="rounded-lg border border-border-strong px-3 py-2 focus:border-accent"
             >
               <option value="whisper-large-v3-turbo">Rápida (turbo)</option>
               <option value="whisper-large-v3">Máxima (large-v3)</option>
             </select>
+            <DefaultAffordance
+              isDefault={qualityField.isDefault}
+              saving={qualityField.saving}
+              onRestore={qualityField.restore}
+              onSetDefault={setQualityAsDefault}
+            />
           </label>
         </div>
       </div>
@@ -659,6 +698,50 @@ export function TranscribeWorkspace({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Affordance estilo VS Code Settings: pill "Default" cuando el selector coincide con el default
+ * guardado, o "Modificado · restaurar" + "Fijar como default" cuando se cambió solo para esta
+ * tanda (override puntual, ver `TranscribeWorkspace`) — el estado default-vs-cambiado queda
+ * siempre visible, sin que el usuario tenga que adivinarlo.
+ */
+function DefaultAffordance({
+  isDefault,
+  saving,
+  onRestore,
+  onSetDefault,
+}: {
+  isDefault: boolean;
+  saving: boolean;
+  onRestore: () => void;
+  onSetDefault: () => void;
+}) {
+  if (isDefault) {
+    return (
+      <span className="mt-1 inline-flex w-fit items-center rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] font-medium text-tertiary">
+        Default
+      </span>
+    );
+  }
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
+      <button type="button" onClick={onRestore} className="font-medium text-accent hover:underline">
+        Modificado · restaurar
+      </button>
+      <span className="text-tertiary" aria-hidden="true">
+        ·
+      </span>
+      <button
+        type="button"
+        onClick={onSetDefault}
+        disabled={saving}
+        className="font-medium text-accent hover:underline disabled:opacity-50"
+      >
+        {saving ? "Guardando…" : "Fijar como default"}
+      </button>
+    </span>
   );
 }
 

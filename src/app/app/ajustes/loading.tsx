@@ -14,6 +14,20 @@ export default function AjustesLoading() {
             <Skeleton className="h-3 w-full max-w-sm" />
           </div>
         </div>
+        <div className="mt-4 flex gap-4">
+          <Skeleton className="h-16 w-32" />
+          <Skeleton className="h-16 w-32" />
+          <Skeleton className="h-16 w-32" />
+        </div>
+      </div>
+      <div className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="h-9 w-9 rounded-lg" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-full max-w-sm" />
+          </div>
+        </div>
         <Skeleton className="mt-4 h-10 w-48" />
       </div>
     </div>
