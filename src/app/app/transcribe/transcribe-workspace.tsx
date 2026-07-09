@@ -392,21 +392,21 @@ export function TranscribeWorkspace({
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-5 flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Nueva transcripción</h1>
-        <Link href="/app" className="text-sm font-medium text-slate-500 hover:text-brand-600">
+        <Link href="/app" className="text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:text-accent">
           ← Volver
         </Link>
       </div>
 
       {/* Destino — siempre visible, para saber DÓNDE van a caer los audios */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <label htmlFor="destino" className="mb-1.5 block text-sm font-semibold text-slate-600">
+      <div className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+        <label htmlFor="destino" className="mb-1.5 block text-sm font-semibold text-secondary">
           Proyecto destino
         </label>
         <select
           id="destino"
           value={destino}
           onChange={(e) => setDestino(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-400"
+          className="w-full rounded-lg border border-border-strong px-3 py-2 text-sm focus:border-accent"
         >
           <option value="">Sin proyecto</option>
           {projects.map((p) => (
@@ -426,7 +426,7 @@ export function TranscribeWorkspace({
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Nombre del proyecto nuevo"
               aria-label="Nombre del proyecto nuevo"
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
+              className="min-w-0 flex-1 rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent"
             />
           </div>
         )}
@@ -434,11 +434,11 @@ export function TranscribeWorkspace({
         {/* Opciones compactas */}
         <div className="mt-4 flex flex-wrap gap-4">
           <label className="flex flex-col text-sm">
-            <span className="mb-1 font-semibold text-slate-500">Idioma</span>
+            <span className="mb-1 font-semibold text-tertiary">Idioma</span>
             <select
               value={language}
               onChange={(e) => changeLanguage(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 focus:border-brand-400"
+              className="rounded-lg border border-border-strong px-3 py-2 focus:border-accent"
             >
               <option value="es">Español</option>
               <option value="en">Inglés</option>
@@ -446,11 +446,11 @@ export function TranscribeWorkspace({
             </select>
           </label>
           <label className="flex flex-col text-sm">
-            <span className="mb-1 font-semibold text-slate-500">Calidad</span>
+            <span className="mb-1 font-semibold text-tertiary">Calidad</span>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 focus:border-brand-400"
+              className="rounded-lg border border-border-strong px-3 py-2 focus:border-accent"
             >
               <option value="whisper-large-v3-turbo">Rápida (turbo)</option>
               <option value="whisper-large-v3">Máxima (large-v3)</option>
@@ -478,7 +478,7 @@ export function TranscribeWorkspace({
         }}
         aria-label="Elegir o arrastrar audios para transcribir"
         className={`mt-4 cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition ${
-          dragOver ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-white hover:border-brand-300 hover:bg-slate-50"
+          dragOver ? "border-accent bg-accent-subtle" : "border-border-strong bg-surface hover:border-accent hover:bg-background"
         }`}
       >
         <input
@@ -497,8 +497,8 @@ export function TranscribeWorkspace({
         <p className="text-2xl" aria-hidden="true">
           📤
         </p>
-        <p className="mt-2 font-medium text-slate-700">Arrastrá tus audios acá</p>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-2 font-medium text-secondary">Arrastrá tus audios acá</p>
+        <p className="mt-1 text-sm text-tertiary">
           o hacé clic para elegirlos · podés cargar varios · mp3, wav, ogg, m4a…
         </p>
       </div>
@@ -538,7 +538,7 @@ export function TranscribeWorkspace({
         )}
       </div>
       {capturing && (
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-tertiary">
           Recordá tildar &quot;Compartir audio de la pestaña&quot; en el diálogo del navegador (ej. con Google Meet
           abierto en otra pestaña).
         </p>
@@ -552,7 +552,7 @@ export function TranscribeWorkspace({
           {items.map((it) => (
             <li
               key={it.key}
-              className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
+              className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3"
             >
               <StatusDot status={it.status} />
               <div className="min-w-0 flex-1">
@@ -575,7 +575,7 @@ export function TranscribeWorkspace({
                       }
                     }}
                     aria-label={`Editar título de ${it.title}`}
-                    className="w-full min-w-0 rounded-md border border-brand-400 px-2 py-1 text-sm font-medium text-slate-800 focus:outline-none"
+                    className="w-full min-w-0 rounded-md border border-accent px-2 py-1 text-sm font-medium text-foreground focus:outline-none"
                   />
                 ) : it.status === "pending" && !running ? (
                   <button
@@ -584,27 +584,27 @@ export function TranscribeWorkspace({
                     className="group flex max-w-full items-center gap-1.5 text-left"
                     aria-label={`Editar título de ${it.title}`}
                   >
-                    <span className="truncate text-sm font-medium text-slate-800 group-hover:text-brand-600">
+                    <span className="truncate text-sm font-medium text-foreground transition-colors duration-150 ease-out group-hover:text-accent">
                       {it.title}
                     </span>
                     <span
-                      className="shrink-0 text-xs text-slate-300 group-hover:text-brand-400"
+                      className="shrink-0 text-xs text-tertiary transition-colors duration-150 ease-out group-hover:text-accent"
                       aria-hidden="true"
                     >
                       ✏️
                     </span>
                   </button>
                 ) : (
-                  <p className="truncate text-sm font-medium text-slate-800">{it.title}</p>
+                  <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
                 )}
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-tertiary">
                   {formatFileSize(it.file.size)}
                   {it.status === "duplicate" && " · ya estaba guardado"}
                   {it.status === "error" && ` · ${it.error}`}
                 </p>
               </div>
               {(it.status === "done" || it.status === "duplicate") && it.resultId && (
-                <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-brand-600 hover:underline">
+                <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-accent hover:underline">
                   Ver
                 </Link>
               )}
@@ -612,7 +612,7 @@ export function TranscribeWorkspace({
                 <button
                   type="button"
                   onClick={() => removeItem(it.key)}
-                  className="tap-target flex shrink-0 items-center justify-center rounded text-slate-300 transition hover:text-red-500"
+                  className="tap-target flex shrink-0 items-center justify-center rounded text-tertiary transition hover:text-red-500"
                   aria-label={`Quitar ${it.title} de la cola`}
                 >
                   ✕
@@ -653,7 +653,7 @@ export function TranscribeWorkspace({
               : "Transcribir"}
         </Button>
         {allDone && (
-          <Link href={dashboardHref} className="text-sm font-semibold text-brand-600 hover:underline">
+          <Link href={dashboardHref} className="text-sm font-semibold text-accent hover:underline">
             {doneCount > 0 ? `Ver ${doneCount} en el dashboard →` : "Ir al dashboard →"}
           </Link>
         )}
@@ -663,7 +663,7 @@ export function TranscribeWorkspace({
 }
 
 function StatusDot({ status }: { status: Status }) {
-  if (status === "working") return <Spinner size="sm" className="shrink-0 text-brand-500" />;
+  if (status === "working") return <Spinner size="sm" className="shrink-0 text-accent" />;
   const map: Record<Exclude<Status, "working">, { label: string; cls: string }> = {
     pending: { label: "⏳", cls: "" },
     done: { label: "✅", cls: "" },

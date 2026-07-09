@@ -13,7 +13,7 @@ export default async function DescargarPage() {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
+    <main className="min-h-screen bg-background text-foreground">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5 sm:px-5">
         <Link href="/" className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
@@ -28,9 +28,9 @@ export default async function DescargarPage() {
 
       <section className="mx-auto max-w-3xl px-4 pt-16 pb-10 text-center sm:px-5 sm:pt-24">
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-          Sincronizador de <span className="text-brand-600">escritorio</span>
+          Sincronizador de <span className="text-accent">escritorio</span>
         </h1>
-        <p className="mx-auto mt-5 max-w-xl text-lg text-slate-600">
+        <p className="mx-auto mt-5 max-w-xl text-lg text-secondary">
           Sincronizá una carpeta de tu PC con tus proyectos en la nube, como Dropbox pero para tus
           transcripciones. Editá desde la web o desde tu compu y todo queda al día automáticamente.
         </p>
@@ -42,7 +42,7 @@ export default async function DescargarPage() {
           >
             ⬇ Descargar para Windows
           </a>
-          <p className="mt-3 text-sm text-slate-500">Windows 10/11 · 64 bits · se actualiza sola</p>
+          <p className="mt-3 text-sm text-tertiary">Windows 10/11 · 64 bits · se actualiza sola</p>
         </div>
       </section>
 
@@ -65,12 +65,12 @@ export default async function DescargarPage() {
 
 function Feature({ icon, title, desc }: { icon: string; title: string; desc: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
       <span className="text-xl" aria-hidden="true">
         {icon}
       </span>
       <h3 className="mt-2 font-semibold">{title}</h3>
-      <p className="mt-1 text-sm text-slate-600">{desc}</p>
+      <p className="mt-1 text-sm text-secondary">{desc}</p>
     </div>
   );
 }

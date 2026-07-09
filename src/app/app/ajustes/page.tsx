@@ -41,8 +41,8 @@ export default async function AjustesPage({
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
-      <h1 className="text-2xl font-bold tracking-tight text-slate-900">Ajustes</h1>
-      <p className="mt-1 text-sm text-slate-500">Preferencias de tu cuenta e integraciones.</p>
+      <h1 className="text-2xl font-bold tracking-tight text-foreground">Ajustes</h1>
+      <p className="mt-1 text-sm text-tertiary">Preferencias de tu cuenta e integraciones.</p>
 
       {message && (
         <div
@@ -58,14 +58,14 @@ export default async function AjustesPage({
         </div>
       )}
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-lg" aria-hidden="true">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
             ☁️
           </span>
           <div>
-            <h2 className="font-semibold text-slate-900">Google Drive</h2>
-            <p className="text-sm text-slate-500">
+            <h2 className="font-semibold text-foreground">Google Drive</h2>
+            <p className="text-sm text-tertiary">
               Conectá tu cuenta para que tus transcripciones se mantengan sincronizadas con Drive automáticamente.
             </p>
           </div>
@@ -91,8 +91,8 @@ export default async function AjustesPage({
         </div>
 
         {isConnected && !isRevoked && (
-          <div className="mt-4 border-t border-slate-100 pt-4">
-            <p className="text-sm text-slate-500">
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="text-sm text-tertiary">
               Conectá una carpeta existente para traerla con toda su jerarquía de subcarpetas y notas.
             </p>
             <div className="mt-3">

@@ -1,12 +1,12 @@
 /** Bloque base con pulso de carga. Componer con className para dar forma (línea, círculo, tarjeta). */
 export function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-md bg-slate-200/80 ${className}`} aria-hidden="true" />;
+  return <div className={`animate-pulse rounded-md bg-border/80 ${className}`} aria-hidden="true" />;
 }
 
 /** Fila de skeleton para listas de transcripciones/proyectos. */
 export function SkeletonRow() {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
       <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
       <div className="min-w-0 flex-1 space-y-2">
         <Skeleton className="h-3.5 w-2/5" />

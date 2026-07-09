@@ -108,7 +108,7 @@ export function ProjectRow({
     return (
       <div
         style={{ paddingLeft: Math.min(depth, MAX_INDENT_DEPTH) * 16 }}
-        className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-1.5 py-1.5"
+        className="flex items-center gap-1.5 rounded-lg bg-background px-1.5 py-1.5"
       >
         <EmojiPicker value={icon} onChange={setIcon} />
         <input
@@ -120,7 +120,7 @@ export function ProjectRow({
             if (e.key === "Enter") saveRename();
             if (e.key === "Escape") setEditing(false);
           }}
-          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-brand-400"
+          className="min-w-0 flex-1 rounded-md border border-border-strong px-2 py-1 text-sm focus:border-accent"
         />
         <Button size="sm" onClick={saveRename} loading={busy} className="px-2.5 py-1">
           OK
@@ -135,14 +135,14 @@ export function ProjectRow({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
-        active ? "bg-brand-50" : "hover:bg-slate-100"
-      } ${dragOver ? "bg-brand-100 ring-2 ring-inset ring-brand-400" : ""}`}
+        active ? "bg-accent-subtle" : "hover:bg-surface-secondary"
+      } ${dragOver ? "bg-accent-subtle ring-2 ring-inset ring-accent" : ""}`}
     >
       <Link
         href={`/app?project=${project.id}`}
         style={{ paddingLeft: 10 + Math.min(depth, MAX_INDENT_DEPTH) * 16 }}
         className={`flex min-w-0 flex-1 items-center gap-2 py-2 pr-2.5 text-sm ${
-          active ? "font-semibold text-brand-700" : "text-slate-700"
+          active ? "font-semibold text-accent-subtle-text" : "text-secondary"
         }`}
       >
         {hasChildren ? (
@@ -157,7 +157,7 @@ export function ProjectRow({
             // Hit-slop: el glyph queda visualmente chico (no se agranda el ícono, que rompería la
             // densidad de la lista), pero el área táctil real llega a 44px vía margen negativo —
             // mismo criterio que pide el ítem de touch targets sin inflar el layout.
-            className="tap-target -m-3 flex shrink-0 items-center justify-center rounded text-slate-400 hover:text-slate-600"
+            className="tap-target -m-3 flex shrink-0 items-center justify-center rounded text-tertiary transition-colors duration-150 ease-out hover:text-secondary"
           >
             {expanded ? "▾" : "▸"}
           </button>
@@ -171,7 +171,7 @@ export function ProjectRow({
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
-        <span className="shrink-0 text-xs tabular-nums text-slate-500">{count}</span>
+        <span className="shrink-0 text-xs tabular-nums text-tertiary">{count}</span>
       </Link>
       <IconMenu label={`Opciones de ${project.name}`}>
         {(close) => (

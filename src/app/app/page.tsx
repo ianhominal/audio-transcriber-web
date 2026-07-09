@@ -161,8 +161,8 @@ export default async function Dashboard({
       <DashboardShell
         sidebar={
           <div className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-              <p className="mb-2 px-1.5 pt-0.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <div className="rounded-2xl border border-border bg-surface p-3 shadow-sm">
+              <p className="mb-2 px-1.5 pt-0.5 text-xs font-semibold uppercase tracking-wide text-tertiary">
                 Proyectos
               </p>
               {/* El `max-h`/`overflow-y-auto` solo tiene sentido en desktop, donde el sidebar es
@@ -255,7 +255,7 @@ export default async function Dashboard({
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900">{heading}</h1>
+              <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
               <Link href={newHref} className={buttonClasses({ size: "md" })}>
                 + Nueva transcripción
               </Link>
@@ -297,19 +297,19 @@ export default async function Dashboard({
  * app). */
 function Breadcrumb({ chain }: { chain: { id: string; name: string; icon: string }[] }) {
   return (
-    <nav aria-label="Ruta de carpetas" className="mb-3 flex flex-wrap items-center gap-1 text-sm text-slate-500">
-      <Link href="/app" className="transition hover:text-brand-600">
+    <nav aria-label="Ruta de carpetas" className="mb-3 flex flex-wrap items-center gap-1 text-sm text-tertiary">
+      <Link href="/app" className="transition hover:text-accent">
         🗂️ Todas
       </Link>
       {chain.map((p, i) => (
         <span key={p.id} className="flex items-center gap-1">
-          <span className="text-slate-300">/</span>
+          <span className="text-tertiary">/</span>
           {i === chain.length - 1 ? (
-            <span className="font-medium text-slate-700">
+            <span className="font-medium text-secondary">
               {p.icon || "📁"} {p.name}
             </span>
           ) : (
-            <Link href={`/app?project=${p.id}`} className="transition hover:text-brand-600">
+            <Link href={`/app?project=${p.id}`} className="transition hover:text-accent">
               {p.icon || "📁"} {p.name}
             </Link>
           )}
@@ -336,12 +336,12 @@ function SidebarLink({
     <Link
       href={href}
       className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-        active ? "bg-brand-50 font-semibold text-brand-700" : "text-slate-700 hover:bg-slate-100"
+        active ? "bg-accent-subtle font-semibold text-accent-subtle-text" : "text-secondary hover:bg-surface-secondary"
       }`}
     >
       <span className="text-base leading-none">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="shrink-0 text-xs tabular-nums text-slate-500">{count}</span>
+      <span className="shrink-0 text-xs tabular-nums text-tertiary">{count}</span>
     </Link>
   );
 }

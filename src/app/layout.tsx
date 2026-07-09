@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -22,6 +23,10 @@ export const metadata: Metadata = {
   },
 };
 
+// `themeColor` es metadata estática (resuelta en build/request), no reactiva al tema
+// elegido por el usuario en el cliente — Next no ofrece una forma SSR-safe de leer el
+// tema de next-themes acá. Se deja el brand-600 actual; la barra de estado del navegador
+// no cambia entre light/dark (no rompe nada, solo no es "perfecta").
 export const viewport: Viewport = {
   themeColor: "#4f46e5",
   width: "device-width",
@@ -36,9 +41,14 @@ export default function RootLayout({
   return (
     <html
       lang="es"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

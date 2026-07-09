@@ -70,7 +70,7 @@ export function ProjectHeader({
   }
 
   return (
-    <header className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+    <header className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         {editingName ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -84,7 +84,7 @@ export function ProjectHeader({
                 if (e.key === "Enter") saveName();
                 if (e.key === "Escape") setEditingName(false);
               }}
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-xl font-bold text-slate-900 focus:border-brand-400"
+              className="min-w-0 flex-1 rounded-md border border-border-strong px-2.5 py-1.5 text-xl font-bold text-foreground focus:border-accent"
             />
             <Button size="sm" onClick={saveName} loading={savingName}>
               OK
@@ -97,11 +97,11 @@ export function ProjectHeader({
           <button
             type="button"
             onClick={() => setEditingName(true)}
-            className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-slate-50"
+            className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-background"
             title="Editar nombre e ícono"
           >
             <span className="text-2xl leading-none">{project.icon || "📁"}</span>
-            <span className="truncate text-2xl font-bold tracking-tight text-slate-900">{project.name}</span>
+            <span className="truncate text-2xl font-bold tracking-tight text-foreground">{project.name}</span>
             {project.syncOrigin === "drive" && (
               <span title="Sincronizado con Google Drive" className="text-sm">
                 ☁️
@@ -109,10 +109,10 @@ export function ProjectHeader({
             )}
           </button>
         )}
-        <span className="shrink-0 pt-1.5 text-xs text-slate-500">Creado el {formatDate(project.createdAt)}</span>
+        <span className="shrink-0 pt-1.5 text-xs text-tertiary">Creado el {formatDate(project.createdAt)}</span>
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-slate-500">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-tertiary">
         <span>
           📁 {subfolderCount} subcarpeta{subfolderCount === 1 ? "" : "s"}
         </span>
@@ -131,7 +131,7 @@ export function ProjectHeader({
               autoFocus
               placeholder="Contexto o descripción del proyecto…"
               aria-label="Contexto o descripción del proyecto"
-              className="w-full resize-y rounded-lg border border-slate-300 p-2.5 text-sm text-slate-700 focus:border-brand-400 focus:outline-none"
+              className="w-full resize-y rounded-lg border border-border-strong p-2.5 text-sm text-secondary focus:border-accent focus:outline-none"
             />
             <div className="flex gap-2">
               <Button size="sm" onClick={saveDescription} loading={savingDesc}>
@@ -153,9 +153,9 @@ export function ProjectHeader({
           <button
             type="button"
             onClick={() => setEditingDesc(true)}
-            className="w-full rounded-lg px-1 py-1 text-left text-sm text-slate-600 transition hover:bg-slate-50"
+            className="w-full rounded-lg px-1 py-1 text-left text-sm text-secondary transition hover:bg-background"
           >
-            {project.description || <span className="text-slate-500">+ Agregar contexto o descripción…</span>}
+            {project.description || <span className="text-tertiary">+ Agregar contexto o descripción…</span>}
           </button>
         )}
       </div>

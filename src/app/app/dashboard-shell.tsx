@@ -106,7 +106,7 @@ export function DashboardShell({ sidebar }: { sidebar: ReactNode }) {
           onClick={() => setOpen(true)}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className="tap-target flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          className="tap-target flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 text-sm font-semibold text-secondary shadow-sm transition hover:bg-background"
         >
           <span aria-hidden="true" className="text-base leading-none">
             ☰
@@ -118,7 +118,7 @@ export function DashboardShell({ sidebar }: { sidebar: ReactNode }) {
       {open &&
         createPortal(
           <div className="fixed inset-0 z-40 md:hidden">
-            <div className="absolute inset-0 bg-slate-900/40" onClick={close} aria-hidden="true" />
+            <div className="absolute inset-0 bg-overlay" onClick={close} aria-hidden="true" />
             <div
               ref={panelRef}
               role="dialog"
@@ -135,17 +135,17 @@ export function DashboardShell({ sidebar }: { sidebar: ReactNode }) {
                 if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
                 if ((e.target as HTMLElement).closest("a[href]")) close();
               }}
-              className="animate-drawer-in absolute inset-y-0 left-0 flex w-[85%] max-w-xs flex-col overflow-y-auto bg-slate-50 p-4 shadow-xl"
+              className="animate-drawer-in absolute inset-y-0 left-0 flex w-[85%] max-w-xs flex-col overflow-y-auto bg-background p-4 shadow-xl"
             >
               <div className="mb-3 flex items-center justify-between">
-                <p id={titleId} className="text-sm font-semibold text-slate-900">
+                <p id={titleId} className="text-sm font-semibold text-foreground">
                   Proyectos
                 </p>
                 <button
                   type="button"
                   onClick={close}
                   aria-label="Cerrar"
-                  className="tap-target flex items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                  className="tap-target flex items-center justify-center rounded-lg text-tertiary transition hover:bg-border hover:text-secondary"
                 >
                   ✕
                 </button>

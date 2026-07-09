@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ToastProvider } from "@/components/ui/Toast";
 import { InstallPrompt } from "@/components/install-prompt";
+import { ThemeToggle } from "@/components/theme-toggle";
 import LogoutButton from "./logout-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -15,8 +16,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <div className="min-h-screen bg-background text-foreground">
+        <header className="sticky top-0 z-20 border-b border-border bg-surface/90 backdrop-blur">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
             <Link href="/app" className="flex items-center gap-2.5 font-bold tracking-tight">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
@@ -27,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <nav className="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="Cuenta">
               <Link
                 href="/descargar"
-                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-brand-700"
+                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
               >
                 <span className="sm:hidden" aria-hidden="true">
                   ⬇
@@ -36,13 +37,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </Link>
               <Link
                 href="/app/ajustes"
-                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-brand-700"
+                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
               >
                 Ajustes
               </Link>
-              <span className="hidden truncate text-sm text-slate-500 md:inline md:max-w-[12rem]" title={user.email}>
+              <span className="hidden truncate text-sm text-tertiary md:inline md:max-w-[12rem]" title={user.email}>
                 {user.email}
               </span>
+              <ThemeToggle />
               <LogoutButton />
             </nav>
           </div>

@@ -135,19 +135,19 @@ export function TranscriptionRow({
       draggable={!busy}
       onDragStart={handleDragStart}
       onDragEnd={() => setDragging(false)}
-      className={`flex cursor-grab items-stretch gap-1 rounded-xl border border-slate-200 bg-white transition hover:border-brand-300 hover:shadow-sm active:cursor-grabbing ${
+      className={`flex cursor-grab items-stretch gap-1 rounded-xl border border-border bg-surface transition hover:border-accent hover:shadow-sm active:cursor-grabbing ${
         busy ? "opacity-50" : ""
       } ${dragging ? "opacity-40" : ""}`}
     >
       <Link href={`/app/t/${transcription.id}`} draggable={false} className="block min-w-0 flex-1 p-4">
         <div className="flex items-baseline justify-between gap-4">
-          <p className="truncate font-semibold text-slate-800">
+          <p className="truncate font-semibold text-foreground">
             <span className="mr-1.5">{transcription.icon || "📄"}</span>
             {displayName}
           </p>
-          <span className="shrink-0 text-xs text-slate-500">{formatDate(transcription.created_at)}</span>
+          <span className="shrink-0 text-xs text-tertiary">{formatDate(transcription.created_at)}</span>
         </div>
-        <p className="mt-1 line-clamp-2 text-sm text-slate-600">
+        <p className="mt-1 line-clamp-2 text-sm text-secondary">
           {transcription.text || "(sin texto)"}
         </p>
       </Link>
@@ -155,7 +155,7 @@ export function TranscriptionRow({
         <IconMenu label="Opciones de la transcripción">
           {(close) => (
             <>
-              <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-tertiary">
                 Mover a
               </p>
               <div className="max-h-56 overflow-auto">
@@ -181,7 +181,7 @@ export function TranscriptionRow({
                   ＋ Proyecto nuevo…
                 </MenuItem>
               </div>
-              <div className="my-1 border-t border-slate-100" />
+              <div className="my-1 border-t border-border" />
               <MenuItem danger onClick={() => { remove(); close(); }}>🗑️ Borrar</MenuItem>
             </>
           )}
@@ -189,10 +189,10 @@ export function TranscriptionRow({
       </div>
       {newProjectOpen && (
         <Modal onClose={closeNewProjectModal} labelledBy="new-project-title">
-          <h2 id="new-project-title" className="text-lg font-semibold text-slate-900">
+          <h2 id="new-project-title" className="text-lg font-semibold text-foreground">
             Proyecto nuevo
           </h2>
-          <p className="mt-1 text-sm text-slate-600">Se crea el proyecto y esta transcripción se mueve ahí.</p>
+          <p className="mt-1 text-sm text-secondary">Se crea el proyecto y esta transcripción se mueve ahí.</p>
           <input
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
@@ -202,7 +202,7 @@ export function TranscriptionRow({
             onKeyDown={(e) => {
               if (e.key === "Enter") submitNewProject();
             }}
-            className="mt-4 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
+            className="mt-4 w-full rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent"
           />
           {newProjectError && <p className="mt-2 text-xs text-red-600">{newProjectError}</p>}
           <div className="mt-4 flex justify-end gap-2">

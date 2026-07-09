@@ -5,12 +5,12 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "dang
 export type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: "bg-brand-600 font-semibold text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:text-slate-500",
-  secondary: "border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50",
-  ghost: "font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50",
-  danger: "bg-red-600 font-semibold text-white hover:bg-red-700 disabled:bg-slate-300 disabled:text-slate-500",
+  primary: "bg-brand-600 font-semibold text-white hover:bg-brand-700 disabled:bg-border-strong disabled:text-tertiary",
+  secondary: "border border-border-strong bg-surface font-medium text-secondary hover:bg-background disabled:opacity-50",
+  ghost: "font-medium text-secondary hover:bg-surface-secondary disabled:opacity-50",
+  danger: "bg-red-600 font-semibold text-white hover:bg-red-700 disabled:bg-border-strong disabled:text-tertiary",
   "danger-outline": "border border-red-200 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50",
-  success: "bg-emerald-600 font-semibold text-white hover:bg-emerald-600 disabled:bg-slate-300 disabled:text-slate-500",
+  success: "bg-emerald-600 font-semibold text-white hover:bg-emerald-600 disabled:bg-border-strong disabled:text-tertiary",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

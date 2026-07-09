@@ -37,7 +37,7 @@ export function NewProjectButton() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-500 transition hover:border-brand-400 hover:text-brand-600"
+        className="w-full rounded-lg border border-dashed border-border-strong px-3 py-2 text-sm font-medium text-tertiary transition hover:border-accent hover:text-accent"
       >
         + Nuevo proyecto
       </button>
@@ -48,7 +48,7 @@ export function NewProjectButton() {
     <form
       ref={formRef}
       action={handle}
-      className="space-y-2 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+      className="space-y-2 rounded-xl border border-border bg-surface p-2.5 shadow-sm"
     >
       <div className="flex gap-2">
         <EmojiPicker value={icon} onChange={setIcon} />
@@ -56,7 +56,7 @@ export function NewProjectButton() {
           name="name"
           autoFocus
           placeholder="Nombre del proyecto"
-          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
+          className="min-w-0 flex-1 rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent"
           aria-label="Nombre del proyecto"
         />
       </div>
@@ -66,7 +66,7 @@ export function NewProjectButton() {
         rows={2}
         placeholder="Contexto o descripción (opcional)…"
         aria-label="Contexto o descripción del proyecto"
-        className="w-full resize-y rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+        className="w-full resize-y rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent focus:outline-none"
       />
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex gap-2">
