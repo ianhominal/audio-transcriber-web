@@ -18,6 +18,13 @@ import { useToast } from "@/components/ui/Toast";
 import { useTranscriptionDefaults } from "@/lib/settings/use-transcription-defaults";
 import { useOverridableDefault } from "@/lib/settings/use-overridable-default";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
+import {
+  TRANSLATION_LANGUAGES,
+  DEFAULT_TRANSLATION_LANGUAGE,
+  DEFAULT_TRANSCRIBE_MODE,
+  type TranscribeMode,
+  type TranslationLanguageCode,
+} from "@/lib/translate/languages";
 
 // Formatos que Groq/Whisper acepta nativamente (mp4/mpeg incluidos: extrae el audio del video).
 const SUPPORTED = [
@@ -95,6 +102,13 @@ export function TranscribeWorkspace({
 
   const language = languageField.value;
   const model = qualityField.value;
+
+  // Modo "Transcribir" vs "Transcribir y traducir con IA" (Fase F4, ver ROADMAP.md item 6) +
+  // idioma destino. A propósito NO usa `useOverridableDefault`/defaults de F1 todavía: es una
+  // elección puntual por tanda (arranca siempre en "Transcribir"), no un default persistente —
+  // ver nota de alcance en el JSX más abajo.
+  const [mode, setMode] = useState<TranscribeMode>(DEFAULT_TRANSCRIBE_MODE);
+  const [targetLanguage, setTargetLanguage] = useState<TranslationLanguageCode>(DEFAULT_TRANSLATION_LANGUAGE);
 
   const setLanguageAsDefault = async () => {
     try {
@@ -352,6 +366,10 @@ export function TranscribeWorkspace({
     // (el texto está a salvo), así que no cuenta como `failCount` — se avisa aparte, una sola vez
     // por lote, para no tapar al usuario de toasts si sube varios audios juntos.
     let audioMissingCount = 0;
+    // Cuántos ítems del lote pidieron traducción pero el LLM falló (best-effort: la transcripción
+    // original igual se guardó, ver `translationWarning` en /api/transcribe) — mismo criterio de
+    // "un solo aviso agrupado por lote" que `audioMissingCount`.
+    let translationWarningCount = 0;
     for (const item of toProcess) {
       // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app.
       if (item.file.size > WEB_MAX_BYTES) {
@@ -368,6 +386,8 @@ export function TranscribeWorkspace({
         form.append("file", item.file);
         form.append("language", language);
         form.append("model", model);
+        form.append("mode", mode);
+        if (mode === "translate") form.append("targetLanguage", targetLanguage);
         // Toda la cola (archivos subidos y grabaciones) hereda el mismo proyecto destino del
         // lote, elegido en el selector de arriba.
         if (projectId) form.append("projectId", projectId);
@@ -382,6 +402,7 @@ export function TranscribeWorkspace({
         });
         okCount++;
         if (!data.duplicate && data.audioStored === false) audioMissingCount++;
+        if (!data.duplicate && data.translationWarning) translationWarningCount++;
       } catch (e) {
         patch(item.key, { status: "error", error: e instanceof Error ? e.message : "Error." });
         failCount++;
@@ -404,6 +425,14 @@ export function TranscribeWorkspace({
         audioMissingCount === 1
           ? "Se guardó la transcripción, pero el audio no se pudo subir. Podés volver a subir el audio más tarde."
           : `Se guardaron ${audioMissingCount} transcripciones, pero sus audios no se pudieron subir. Podés volver a subirlos más tarde.`,
+        "info"
+      );
+    }
+    if (translationWarningCount > 0) {
+      toast(
+        translationWarningCount === 1
+          ? "No se pudo traducir un audio — se guardó igual la transcripción original."
+          : `No se pudo traducir ${translationWarningCount} audios — se guardaron igual las transcripciones originales.`,
         "info"
       );
     }
@@ -495,6 +524,64 @@ export function TranscribeWorkspace({
               onSetDefault={setQualityAsDefault}
             />
           </label>
+        </div>
+
+        {/* Modo: transcribir tal cual vs. transcribir + traducir el texto con un LLM (Fase F4).
+            Separado con un borde superior propio para no mezclarse visualmente con Idioma/Calidad
+            de arriba — esos son selectores con affordance de default de F1 (pill "Default" /
+            "Modificado · restaurar"); esto es una elección puntual por tanda, sin esa affordance
+            todavía (ver ROADMAP.md item 6/F4, "Pendiente" de integrar con los defaults). */}
+        <div className="mt-4 border-t border-border pt-4">
+          <span className="mb-1.5 block text-sm font-semibold text-secondary">Traducción</span>
+          <div
+            role="group"
+            aria-label="Modo de transcripción"
+            className="inline-flex gap-0.5 rounded-lg border border-border bg-surface-secondary p-0.5"
+          >
+            <button
+              type="button"
+              aria-pressed={mode === "transcribe"}
+              onClick={() => setMode("transcribe")}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 ease-out ${
+                mode === "transcribe" ? "bg-surface text-accent shadow-sm" : "text-tertiary hover:text-secondary"
+              }`}
+            >
+              Transcribir
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === "translate"}
+              onClick={() => setMode("translate")}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 ease-out ${
+                mode === "translate" ? "bg-surface text-accent shadow-sm" : "text-tertiary hover:text-secondary"
+              }`}
+            >
+              Transcribir y traducir
+            </button>
+          </div>
+
+          {mode === "translate" && (
+            <div className="mt-2.5 max-w-xs">
+              <label htmlFor="targetLanguage" className="mb-1 block text-xs font-semibold text-tertiary">
+                Idioma destino
+              </label>
+              <select
+                id="targetLanguage"
+                value={targetLanguage}
+                onChange={(e) => setTargetLanguage(e.target.value as TranslationLanguageCode)}
+                className="w-full rounded-lg border border-border-strong px-3 py-2 text-sm focus:border-accent"
+              >
+                {TRANSLATION_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-xs text-tertiary">
+                Se transcribe y después se traduce el texto con IA — revisá el resultado, puede tener errores.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

@@ -11,6 +11,9 @@ import {
 } from "@/lib/storage";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 import { resolveGroqModel } from "@/lib/transcribe/model";
+import { resolveTranscribeMode, resolveTranslationLanguage, translationLanguageLabel } from "@/lib/translate/languages";
+import { translateText } from "@/lib/translate/groq";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -48,6 +51,11 @@ export async function POST(req: NextRequest) {
   // El modelo lo elige el cliente, pero SIEMPRE se valida contra una allowlist estricta
   // antes de mandarlo a Groq (ver src/lib/transcribe/model.ts) — nunca se reenvía tal cual.
   const model = resolveGroqModel(form.get("model"));
+  // Modo "Transcribir" vs "Transcribir y traducir" (Fase F4, ver ROADMAP.md item 6) + idioma
+  // destino — ambos validados contra allowlists estrictas (ver src/lib/translate/languages.ts),
+  // mismo criterio que `model`/`language` acá arriba.
+  const mode = resolveTranscribeMode(form.get("mode"));
+  const targetLanguage = resolveTranslationLanguage(form.get("targetLanguage"));
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No se recibió ningún audio." }, { status: 400 });
@@ -78,19 +86,54 @@ export async function POST(req: NextRequest) {
   // 1.5) Dedupe: si ya existe una transcripción con el mismo nombre y tamaño para este
   //      usuario, no volvemos a llamar a Groq ni a duplicar. Devolvemos la existente.
   //      Esto también neutraliza el doble-submit (dos requests casi simultáneas).
-  const { data: existing } = await supabase
-    .from("transcriptions")
-    .select("id, text")
-    .eq("user_id", user.id)
-    .eq("audio_name", audioName)
-    .eq("audio_size", file.size)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  //
+  //      Fase F4: el dedupe TIENE EN CUENTA el modo. Si el usuario pide "Transcribir y traducir" a
+  //      un idioma que la copia existente NO tiene (`translated_to` distinto del pedido), NO
+  //      cortamos acá — dejamos que el request siga y produzca la versión traducida (un artefacto
+  //      genuinamente distinto, no un duplicado). Sin esto, pedir traducir un archivo ya transcrito
+  //      devolvía la versión vieja SIN traducir informando éxito total (ni warning ni badge): el
+  //      feature que el usuario pidió simplemente no ocurría, en silencio.
+  //
+  //      `translated_to` puede no existir todavía en el esquema del preview (migración F4 sin
+  //      aplicar) — ante un 42703 reintentamos sin esa columna y asumimos "no traducida" (`null`),
+  //      mismo patrón de compat que el insert/select de más abajo.
+  let existing: { id: string; text: string | null; translated_to: string | null } | null = null;
+  {
+    const withTranslated = await supabase
+      .from("transcriptions")
+      .select("id, text, translated_to")
+      .eq("user_id", user.id)
+      .eq("audio_name", audioName)
+      .eq("audio_size", file.size)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (withTranslated.error && isMissingColumnError(withTranslated.error)) {
+      const reduced = await supabase
+        .from("transcriptions")
+        .select("id, text")
+        .eq("user_id", user.id)
+        .eq("audio_name", audioName)
+        .eq("audio_size", file.size)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      existing = reduced.data ? { ...reduced.data, translated_to: null } : null;
+    } else {
+      existing = withTranslated.data ?? null;
+    }
+  }
 
   if (existing) {
-    return NextResponse.json({ text: existing.text ?? "", duplicate: true, id: existing.id });
+    // La copia existente satisface el pedido si NO se pidió traducir, o si ya está traducida al
+    // mismo idioma destino — solo en ese caso devolvemos el duplicado sin re-procesar.
+    const alreadySatisfiesRequest = mode !== "translate" || existing.translated_to === targetLanguage;
+    if (alreadySatisfiesRequest) {
+      return NextResponse.json({ text: existing.text ?? "", duplicate: true, id: existing.id });
+    }
   }
 
   // 2) Transcribir con Groq.
@@ -135,6 +178,52 @@ export async function POST(req: NextRequest) {
   }
 
   const text = (data.text ?? "").trim();
+
+  // 2.5) Si se pidió "Transcribir y traducir", traducir el texto con un LLM (Groq
+  //      `llama-3.1-8b-instant`, ver src/lib/translate/groq.ts). El modo "translate" nativo de
+  //      Whisper SOLO traduce a inglés (research previo, ver ROADMAP.md) — por eso se traduce el
+  //      TEXTO ya transcrito, no el audio, lo que permite traducir a cualquier idioma de la
+  //      allowlist. Best-effort: si la traducción falla, NO se pierde el trabajo — se guarda la
+  //      transcripción original igual, con un aviso para el cliente (ver `translationWarning`).
+  let finalText = text;
+  let translatedTo: string | null = null;
+  let originalText: string | null = null;
+  let translationWarning: string | undefined;
+
+  if (mode === "translate") {
+    const targetLabel = translationLanguageLabel(targetLanguage);
+    // `translateText` está documentada para NUNCA lanzar (maneja red/parseo internamente), pero
+    // igual la envolvemos en try/catch: todos los pasos best-effort de este handler (subida de
+    // audio, insert) están protegidos así justamente para que una falla acá jamás tire abajo el
+    // request y pierda la transcripción de Whisper ya pagada. Defensa en profundidad ante un futuro
+    // cambio en `groq.ts` que introduzca un throw — un throw no atrapado 500-earía todo el handler
+    // antes de guardar nada.
+    let translationError: string | null = null;
+    try {
+      const translation = await translateText(text, targetLabel, apiKey);
+      if (translation.ok) {
+        finalText = translation.text;
+        translatedTo = targetLanguage;
+        originalText = text;
+      } else {
+        translationError = translation.error;
+      }
+    } catch (err) {
+      translationError = err instanceof Error ? err.message : "Error inesperado al traducir.";
+    }
+
+    if (translationError) {
+      translationWarning = `No se pudo traducir, pero se guardó la transcripción original: ${translationError}`;
+      console.error("[transcribe] translation failed", {
+        userId: user.id,
+        targetLanguage,
+        error: translationError,
+      });
+      Sentry.captureException(new Error(translationError), {
+        extra: { userId: user.id, stage: "translate", targetLanguage },
+      });
+    }
+  }
 
   // 3) Subir el audio a Storage (bucket privado, carpeta del usuario). Best-effort:
   //    si falla la subida, igual guardamos el texto (sin audio).
@@ -189,21 +278,39 @@ export async function POST(req: NextRequest) {
   const title = titleRaw.trim().slice(0, 120);
   let savedId: string | null = null;
   try {
-    const { data: inserted, error: insertErr } = await supabase
+    const baseRow = {
+      user_id: user.id,
+      project_id: projectId,
+      title,
+      audio_name: audioName,
+      audio_size: file.size,
+      audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
+      text: finalText,
+      language,
+      model,
+    };
+    // `translated_to`/`original_text` (Fase F4, ver supabase/migrations/20260709210000_translation.sql)
+    // se aplican automático recién al mergear a `main` (mismo criterio que `projects.color` en F2) —
+    // en el preview de esta branch pueden no existir todavía. Se intenta con las columnas nuevas
+    // primero y, ante un 42703 (columna inexistente), se reintenta sin ellas: la traducción SIGUE
+    // llegando al usuario en la respuesta de este request (`finalText`/`translationWarning`), solo
+    // no queda etiquetada en la fila hasta que la migración esté aplicada. A diferencia de
+    // `projects.color` en F2 (que usa el cache compartido de `schema-compat.ts` con TTL porque tiene
+    // muchos call-sites), acá se detecta por intento directo sin cache: la ventana de "migración sin
+    // aplicar" es corta y de bajo tráfico. OJO: hay OTRO retry de compat en el read-path del detalle
+    // (`app/t/[id]/page.tsx`) y en el dedupe de más arriba — todos independientes y sin cache a
+    // propósito; si esto se volviera caliente, valdría unificarlos en un cache compartido como F2.
+    let insertResult = await supabase
       .from("transcriptions")
-      .insert({
-        user_id: user.id,
-        project_id: projectId,
-        title,
-        audio_name: audioName,
-        audio_size: file.size,
-        audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
-        text,
-        language,
-        model,
-      })
+      .insert({ ...baseRow, translated_to: translatedTo, original_text: originalText })
       .select("id")
       .single();
+
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      insertResult = await supabase.from("transcriptions").insert(baseRow).select("id").single();
+    }
+
+    const { data: inserted, error: insertErr } = insertResult;
     if (insertErr) {
       console.error("[transcribe] transcription insert failed", {
         userId: user.id,
@@ -220,5 +327,10 @@ export async function POST(req: NextRequest) {
     Sentry.captureException(err, { extra: { userId: user.id, stage: "transcription-insert" } });
   }
 
-  return NextResponse.json({ text, id: savedId, audioStored: audioPath !== null });
+  return NextResponse.json({
+    text: finalText,
+    id: savedId,
+    audioStored: audioPath !== null,
+    ...(translationWarning ? { translationWarning } : {}),
+  });
 }

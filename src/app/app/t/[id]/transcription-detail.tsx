@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { useViewportClamp } from "@/hooks/useViewportClamp";
+import { translationLanguageLabel } from "@/lib/translate/languages";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
 
@@ -32,6 +33,11 @@ type Transcription = {
   model: string;
   project_id: string | null;
   created_at: string;
+  // Fase F4 (traducción vía LLM): `null`/ausentes en transcripciones normales o si la migración
+  // todavía no está aplicada (ver fallback en `page.tsx`) — nunca undefined en runtime real, pero
+  // opcionales acá por si algún caller viejo no los manda.
+  translated_to?: string | null;
+  original_text?: string | null;
 };
 
 type Project = { id: string; name: string; icon: string };
@@ -66,6 +72,9 @@ export function TranscriptionDetail({
   const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
+  // Fase F4: solo aplica a transcripciones traducidas (`translated_to`+`original_text` ambos
+  // presentes) — arranca oculto, el texto principal (`text`) ya es el traducido.
+  const [showOriginal, setShowOriginal] = useState(false);
   // Menú "Exportar": portal a `document.body` + clampeo al viewport (mismo patrón que `IconMenu`,
   // extraído a `useViewportClamp`) — antes era `absolute left-0 w-64` sin clamp, así que en
   // pantallas angostas (~360-390px) se salía por el borde derecho.
@@ -242,6 +251,9 @@ export function TranscriptionDetail({
         {transcription.model && <Badge>{transcription.model}</Badge>}
         <Badge>{transcription.language}</Badge>
         {transcription.audio_size > 0 && <Badge>{formatFileSize(transcription.audio_size)}</Badge>}
+        {transcription.translated_to && (
+          <Badge tone="brand">🌐 Traducido a {translationLanguageLabel(transcription.translated_to)}</Badge>
+        )}
       </div>
 
       {/* Descripción / notas */}
@@ -283,6 +295,31 @@ export function TranscriptionDetail({
           ))}
         </select>
       </div>
+
+      {/* Texto original pre-traducción (Fase F4) — solo si esta transcripción se tradujo. El
+          texto principal de abajo (`text`) ya es el traducido; esto es una referencia opcional,
+          no editable (editar el original no tendría efecto — el LLM no vuelve a correr). */}
+      {transcription.translated_to && transcription.original_text && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setShowOriginal((v) => !v)}
+            aria-expanded={showOriginal}
+            aria-controls="original-text-panel"
+            className="text-xs font-semibold text-accent hover:underline"
+          >
+            {showOriginal ? "Ocultar texto original" : "Ver texto original (antes de traducir)"}
+          </button>
+          {showOriginal && (
+            <p
+              id="original-text-panel"
+              className="mt-1.5 whitespace-pre-wrap rounded-lg border border-border bg-background p-3 text-sm text-tertiary"
+            >
+              {transcription.original_text}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Texto editable */}
       <textarea
