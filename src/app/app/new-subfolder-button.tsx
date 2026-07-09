@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSubproject } from "./actions";
 import { EmojiPicker } from "./emoji-picker";
+import { ProjectColorPicker } from "./project-color-picker";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -29,6 +30,7 @@ export function NewSubfolderButton({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("📁");
+  const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -36,6 +38,7 @@ export function NewSubfolderButton({
     setName("");
     setDescription("");
     setIcon("📁");
+    setColor(null);
     setError(null);
   }
 
@@ -46,7 +49,7 @@ export function NewSubfolderButton({
 
   async function submit() {
     setPending(true);
-    const res = await createSubproject(parentId, name, description, icon);
+    const res = await createSubproject(parentId, name, description, icon, color);
     setPending(false);
     if (!res.ok) {
       setError(res.error);
@@ -79,6 +82,7 @@ export function NewSubfolderButton({
           </h2>
           <div className="mt-4 flex gap-2">
             <EmojiPicker value={icon} onChange={setIcon} />
+            <ProjectColorPicker value={color} onChange={setColor} />
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}

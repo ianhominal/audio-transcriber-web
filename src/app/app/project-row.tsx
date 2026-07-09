@@ -5,16 +5,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { IconMenu, MenuItem } from "./icon-menu";
 import { EmojiPicker } from "./emoji-picker";
+import { ProjectColorPicker } from "./project-color-picker";
 import { renameProject, duplicateProject, deleteProject, assignTranscriptionToProject } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { getProjectColor } from "@/lib/project-colors";
 import {
   TRANSCRIPTION_DRAG_MIME,
   decodeTranscriptionDragPayload,
   resolveTranscriptionDrop,
 } from "@/lib/dnd/transcriptionDrag";
 
-type Project = { id: string; name: string; icon: string; syncOrigin?: string };
+type Project = { id: string; name: string; icon: string; syncOrigin?: string; color?: string | null };
 
 // Tope de indentación visual: a partir de esta profundidad, los niveles siguientes ya no suman
 // más `padding-left` — un árbol muy anidado en mobile (~360px) podía comerse todo el ancho
@@ -48,8 +50,10 @@ export function ProjectRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
   const [icon, setIcon] = useState(project.icon || "📁");
+  const [color, setColor] = useState<string | null>(project.color ?? null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const projectColor = getProjectColor(project.color);
 
   /** Mecanismo 1 (drag & drop) de mover una transcripción a este proyecto: soltarla acá cambia su
    * `project_id` reusando la misma server action que el menú "..." de la fila (mecanismo 2). */
@@ -79,7 +83,7 @@ export function ProjectRow({
 
   async function saveRename() {
     setBusy(true);
-    const res = await renameProject(project.id, name, icon);
+    const res = await renameProject(project.id, name, icon, color);
     setBusy(false);
     if (res.ok) {
       setEditing(false);
@@ -111,6 +115,7 @@ export function ProjectRow({
         className="flex items-center gap-1.5 rounded-lg bg-background px-1.5 py-1.5"
       >
         <EmojiPicker value={icon} onChange={setIcon} />
+        <ProjectColorPicker value={color} onChange={setColor} />
         <input
           value={name}
           autoFocus
@@ -134,9 +139,15 @@ export function ProjectRow({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      // Borde izquierdo de acento (Fase F2): solo se agrega `border-l-4` cuando el proyecto TIENE
+      // color — mismo criterio que `ProjectHeader` (ver ese archivo) — para que un proyecto
+      // neutro no reserve espacio de layout: un `border-l-4 border-transparent` igual resta 4px
+      // al content-box y desalinea filas coloreadas vs. neutras dentro de la misma lista.
       className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
-        active ? "bg-accent-subtle" : "hover:bg-surface-secondary"
-      } ${dragOver ? "bg-accent-subtle ring-2 ring-inset ring-accent" : ""}`}
+        projectColor ? `border-l-4 ${projectColor.border}` : ""
+      } ${active ? "bg-accent-subtle" : "hover:bg-surface-secondary"} ${
+        dragOver ? "bg-accent-subtle ring-2 ring-inset ring-accent" : ""
+      }`}
     >
       <Link
         href={`/app?project=${project.id}`}
@@ -165,6 +176,13 @@ export function ProjectRow({
           <span className="w-3.5 shrink-0" />
         ) : null}
         <span className="text-base leading-none">{project.icon || "📁"}</span>
+        {projectColor && (
+          <span
+            title={projectColor.label}
+            aria-hidden="true"
+            className={`h-2 w-2 shrink-0 rounded-full ${projectColor.dot}`}
+          />
+        )}
         {project.syncOrigin === "drive" && (
           <span title="Sincronizado con Google Drive" className="shrink-0 text-xs leading-none">
             ☁️

@@ -5,11 +5,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconMenu, MenuItem } from "./icon-menu";
 import { EmojiPicker } from "./emoji-picker";
+import { ProjectColorPicker } from "./project-color-picker";
 import { renameProject, duplicateProject, deleteProject } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { getProjectColor } from "@/lib/project-colors";
 
-type Subfolder = { id: string; name: string; icon: string; syncOrigin?: string };
+type Subfolder = { id: string; name: string; icon: string; syncOrigin?: string; color?: string | null };
 
 /**
  * Tile de subcarpeta dentro del panel del explorador (estilo "carpeta" de un explorador de
@@ -30,11 +32,13 @@ export function SubfolderCard({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(folder.name);
   const [icon, setIcon] = useState(folder.icon || "📁");
+  const [color, setColor] = useState<string | null>(folder.color ?? null);
   const [busy, setBusy] = useState(false);
+  const folderColor = getProjectColor(folder.color);
 
   async function saveRename() {
     setBusy(true);
-    const res = await renameProject(folder.id, name, icon);
+    const res = await renameProject(folder.id, name, icon, color);
     setBusy(false);
     if (res.ok) {
       setEditing(false);
@@ -71,6 +75,7 @@ export function SubfolderCard({
     return (
       <div className="flex items-center gap-1.5 rounded-xl border border-accent bg-accent-subtle p-3">
         <EmojiPicker value={icon} onChange={setIcon} />
+        <ProjectColorPicker value={color} onChange={setColor} />
         <input
           value={name}
           autoFocus
@@ -98,6 +103,13 @@ export function SubfolderCard({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
             <span className="truncate font-semibold text-foreground">{folder.name}</span>
+            {folderColor && (
+              <span
+                title={folderColor.label}
+                aria-hidden="true"
+                className={`h-2 w-2 shrink-0 rounded-full ${folderColor.dot}`}
+              />
+            )}
             {folder.syncOrigin === "drive" && (
               <span title="Sincronizado con Google Drive" className="shrink-0 text-xs leading-none">
                 ☁️

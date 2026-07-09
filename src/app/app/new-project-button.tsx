@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { createProject } from "./actions";
 import { EmojiPicker } from "./emoji-picker";
+import { ProjectColorPicker } from "./project-color-picker";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 
@@ -10,6 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 export function NewProjectButton() {
   const [open, setOpen] = useState(false);
   const [icon, setIcon] = useState("📁");
+  const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -17,6 +19,7 @@ export function NewProjectButton() {
 
   async function handle(formData: FormData) {
     formData.set("icon", icon);
+    if (color) formData.set("color", color);
     setPending(true);
     const res = await createProject(formData);
     setPending(false);
@@ -27,6 +30,7 @@ export function NewProjectButton() {
     setError(null);
     setOpen(false);
     setIcon("📁");
+    setColor(null);
     formRef.current?.reset();
     toast("Proyecto creado.", "success");
   }
@@ -52,6 +56,7 @@ export function NewProjectButton() {
     >
       <div className="flex gap-2">
         <EmojiPicker value={icon} onChange={setIcon} />
+        <ProjectColorPicker value={color} onChange={setColor} />
         <input
           name="name"
           autoFocus

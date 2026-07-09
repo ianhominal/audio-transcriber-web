@@ -1,22 +1,25 @@
 /**
- * Compatibilidad de esquema para las columnas nuevas de Drive-sync v2
- * (`projects.parent_project_id`, `projects.sync_origin`), agregadas por la migración
- * `supabase/migrations/20260707130000_drive_sync_v2_foundation.sql`.
- *
- * Esa migración se aplica MANUALMENTE en producción (no hay CI que la corra), así que el
- * código puede quedar desplegado antes de que las columnas existan realmente en la base. Este
- * módulo implementa el patrón expand/contract a nivel de columnas: se intenta la operación
- * completa y, si Postgres devuelve "column does not exist" (`42703`), se cae a una versión
- * reducida — sin degradar nada una vez que la migración YA está aplicada.
+ * Compatibilidad de esquema para columnas de `projects` que se agregan vía migraciones que NO
+ * corren solas en producción (se aplican automático recién al mergear a `main`, integración
+ * Supabase↔GitHub — ver cada migración referenciada abajo), así que el código puede quedar
+ * desplegado/en preview antes de que la columna exista realmente en la base. Este módulo
+ * implementa el patrón expand/contract a nivel de columnas: se intenta la operación completa y,
+ * si Postgres devuelve "column does not exist" (`42703`), se cae a una versión reducida — sin
+ * degradar nada una vez que la migración YA está aplicada.
  *
  * Estrategia elegida: detección por INTENTO REAL contra la base (no una consulta previa a
  * information_schema). Motivo: evita un round-trip extra en el camino feliz y evita una
  * segunda fuente de verdad (information_schema) que podría desincronizarse del comportamiento
  * real de PostgREST ante ese request puntual.
+ *
+ * Dos migraciones distintas tocan `projects` con este mismo problema (Drive-sync v2:
+ * `parent_project_id`/`sync_origin`; F2: `color`) y pueden estar en estados de aplicación
+ * INDEPENDIENTES entre sí — por eso cada grupo tiene su propio cache (`createSchemaCompatCache`),
+ * en vez de un único booleano que confundiría "falta color" con "falta toda la jerarquía".
  */
 
 /** TTL del cache de disponibilidad de columnas. Corto a propósito: permite que el sistema se
- * "auto-cure" solo (sin redeploy) poco después de que el usuario corra la migración a mano. */
+ * "auto-cure" solo (sin redeploy) poco después de que la migración termine de aplicarse. */
 export const SCHEMA_COMPAT_CACHE_TTL_MS = 60_000;
 
 type SchemaCompatCache = {
@@ -24,34 +27,56 @@ type SchemaCompatCache = {
   checkedAt: number;
 };
 
-// Cache a NIVEL DE MÓDULO (variable de scope de módulo, no un objeto exportado mutable): un
-// único estado compartido por toda la app (pull, push, cron, etc.) — todos los endpoints se
-// sincronizan con una sola detección real, en vez de repetir el intento fallido por archivo.
-let cache: SchemaCompatCache = { available: null, checkedAt: 0 };
-
-/** Snapshot de solo lectura del cache actual (para uso en los route handlers). */
-export function getSchemaCompatSnapshot(): SchemaCompatCache {
-  return cache;
-}
-
 /**
- * true si conviene volver a detectar contra la base real: nunca se detectó todavía, o el
- * último resultado conocido ya venció su TTL. `now` es inyectable para tests.
+ * Fábrica de un cache de disponibilidad de columna(s), a NIVEL DE MÓDULO (closure, no un objeto
+ * exportado mutable): un único estado compartido por toda la app (pull, push, cron, etc.) por
+ * cada grupo de columnas — todos los endpoints se sincronizan con una sola detección real, en vez
+ * de repetir el intento fallido por archivo.
  */
-export function shouldRedetectSchemaCompat(now: number = Date.now()): boolean {
-  if (cache.available === null) return true;
-  return now - cache.checkedAt > SCHEMA_COMPAT_CACHE_TTL_MS;
+function createSchemaCompatCache() {
+  let cache: SchemaCompatCache = { available: null, checkedAt: 0 };
+
+  return {
+    /** Snapshot de solo lectura del cache actual (para uso en los route handlers). */
+    getSnapshot(): SchemaCompatCache {
+      return cache;
+    },
+    /**
+     * true si conviene volver a detectar contra la base real: nunca se detectó todavía, o el
+     * último resultado conocido ya venció su TTL. `now` es inyectable para tests.
+     */
+    shouldRedetect(now: number = Date.now()): boolean {
+      if (cache.available === null) return true;
+      return now - cache.checkedAt > SCHEMA_COMPAT_CACHE_TTL_MS;
+    },
+    /** Registra el resultado de un intento real contra la base (éxito o fallback). */
+    markResult(available: boolean, now: number = Date.now()): void {
+      cache = { available, checkedAt: now };
+    },
+    /** Solo para tests: vuelve el cache a su estado inicial (sin detección todavía). */
+    resetForTests(): void {
+      cache = { available: null, checkedAt: 0 };
+    },
+  };
 }
 
-/** Registra el resultado de un intento real contra la base (éxito o fallback). */
-export function markSchemaCompatResult(available: boolean, now: number = Date.now()): void {
-  cache = { available, checkedAt: now };
-}
+// ---------- Drive-sync v2: `projects.parent_project_id` / `projects.sync_origin`
+// (supabase/migrations/20260707130000_drive_sync_v2_foundation.sql) ----------
+const driveSyncV2Cache = createSchemaCompatCache();
 
-/** Solo para tests: vuelve el cache a su estado inicial (sin detección todavía). */
-export function resetSchemaCompatCacheForTests(): void {
-  cache = { available: null, checkedAt: 0 };
-}
+export const getSchemaCompatSnapshot = driveSyncV2Cache.getSnapshot;
+export const shouldRedetectSchemaCompat = driveSyncV2Cache.shouldRedetect;
+export const markSchemaCompatResult = driveSyncV2Cache.markResult;
+export const resetSchemaCompatCacheForTests = driveSyncV2Cache.resetForTests;
+
+// ---------- F2: `projects.color`
+// (supabase/migrations/20260709200000_project_color.sql) ----------
+const projectColorCache = createSchemaCompatCache();
+
+export const getProjectColorCompatSnapshot = projectColorCache.getSnapshot;
+export const shouldRedetectProjectColorCompat = projectColorCache.shouldRedetect;
+export const markProjectColorCompatResult = projectColorCache.markResult;
+export const resetProjectColorCompatCacheForTests = projectColorCache.resetForTests;
 
 /**
  * true si el error de Supabase/PostgREST corresponde a una columna inexistente en la tabla

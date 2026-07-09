@@ -5,9 +5,12 @@ import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { buildProjectBreadcrumb, buildProjectTree, getSubfolders, rollUpProjectCounts } from "@/lib/drive/tree";
 import {
+  getProjectColorCompatSnapshot,
   getSchemaCompatSnapshot,
   isMissingColumnError,
+  markProjectColorCompatResult,
   markSchemaCompatResult,
+  shouldRedetectProjectColorCompat,
   shouldRedetectSchemaCompat,
 } from "@/lib/supabase/schema-compat";
 import { DashboardShell } from "./dashboard-shell";
@@ -37,52 +40,91 @@ type Project = {
   created_at: string;
   parent_project_id: string | null;
   sync_origin: string;
+  color: string | null;
 };
 
+const BASE_PROJECT_COLUMNS = "id, name, icon, description, created_at";
+const DRIVE_SYNC_V2_COLUMNS = "parent_project_id, sync_origin";
+const COLOR_COLUMN = "color";
+
 /**
- * Columnas de Drive-sync v2 (doc 10) en `projects`: si la migración `20260707130000_
- * drive_sync_v2_foundation.sql` todavía no se corrió a mano en producción, el select completo
- * devuelve `42703` y ANTES este código quedaba con `projectsData` vacío (dashboard sin
- * proyectos). Ahora cae a la versión reducida y completa los campos por defecto — ver
- * `src/lib/supabase/schema-compat.ts`. `description`/`created_at` existen desde el esquema
- * inicial (no son parte de esa migración), así que se piden siempre en ambos caminos.
+ * Columnas OPCIONALES de `projects` (agregadas por migraciones que se aplican automático recién
+ * al mergear a `main`, no corren solas — ver `src/lib/supabase/schema-compat.ts`): Drive-sync v2
+ * (`parent_project_id`/`sync_origin`, doc 10) y F2 (`color`). Son dos migraciones INDEPENDIENTES
+ * que pueden estar aplicadas o no por separado, así que se pelan de a una — más nueva primero
+ * (`color`) — en vez de asumir que si una falta, faltan las dos. Si el select completo devuelve
+ * `42703`, ANTES este código quedaba con `projectsData` vacío (dashboard sin proyectos); ahora
+ * cae en cascada a versiones reducidas. `description`/`created_at` existen desde el esquema
+ * inicial (no son parte de ninguna de esas migraciones), así que se piden siempre.
  */
 async function fetchProjectsCompat(supabase: SupabaseClient): Promise<Project[]> {
   const now = Date.now();
   const runQuery = (columns: string) =>
     supabase.from("projects").select(columns).is("deleted_at", null).order("created_at", { ascending: true });
 
-  const cached = getSchemaCompatSnapshot();
-  const useReducedDirectly = cached.available === false && !shouldRedetectSchemaCompat(now);
+  const driveCached = getSchemaCompatSnapshot();
+  const colorCached = getProjectColorCompatSnapshot();
+  const driveKnownUnavailable = driveCached.available === false && !shouldRedetectSchemaCompat(now);
+  const colorKnownUnavailable = colorCached.available === false && !shouldRedetectProjectColorCompat(now);
 
-  if (useReducedDirectly) {
-    const { data } = await runQuery("id, name, icon, description, created_at");
-    return withDefaultDriveSyncFields(data);
-  }
+  const driveColumns = driveKnownUnavailable ? "" : `, ${DRIVE_SYNC_V2_COLUMNS}`;
+  const colorColumns = colorKnownUnavailable ? "" : `, ${COLOR_COLUMN}`;
 
-  const { data, error } = await runQuery("id, name, icon, description, created_at, parent_project_id, sync_origin");
+  const { data, error } = await runQuery(BASE_PROJECT_COLUMNS + driveColumns + colorColumns);
   if (!error) {
-    markSchemaCompatResult(true, now);
-    return (data ?? []) as unknown as Project[];
+    if (!driveKnownUnavailable) markSchemaCompatResult(true, now);
+    if (!colorKnownUnavailable) markProjectColorCompatResult(true, now);
+    return normalizeProjectRows(data, !driveKnownUnavailable, !colorKnownUnavailable);
+  }
+  if (!isMissingColumnError(error)) return [];
+
+  // Pela `color` primero (la migración más nueva) y reintenta, antes de asumir que Drive-sync v2
+  // también falta — evita marcarlo como no disponible por un falso positivo cuando esa migración
+  // ya está aplicada y lo único que falta es `color`.
+  if (!colorKnownUnavailable) {
+    const retry = await runQuery(BASE_PROJECT_COLUMNS + driveColumns);
+    if (!retry.error) {
+      // Recién acá confirmamos que sacar `color` resolvió el `42703` original — si se marcara
+      // ANTES de este punto y este retry también fallara (por Drive-sync v2 faltante) y cayera
+      // al fallback final de columnas base, `color` quedaría cacheado como no disponible por todo
+      // el TTL aunque en realidad esté presente en la base.
+      markProjectColorCompatResult(false, now);
+      if (!driveKnownUnavailable) markSchemaCompatResult(true, now);
+      return normalizeProjectRows(retry.data, !driveKnownUnavailable, false);
+    }
+    if (!isMissingColumnError(retry.error)) return [];
   }
 
-  if (isMissingColumnError(error)) {
-    markSchemaCompatResult(false, now);
-    const retry = await runQuery("id, name, icon, description, created_at");
-    return withDefaultDriveSyncFields(retry.data);
-  }
-
-  return [];
+  if (!driveKnownUnavailable) markSchemaCompatResult(false, now);
+  const finalRetry = await runQuery(BASE_PROJECT_COLUMNS);
+  return normalizeProjectRows(finalRetry.data, false, false);
 }
 
-function withDefaultDriveSyncFields(rows: unknown): Project[] {
+function normalizeProjectRows(rows: unknown, driveAvailable: boolean, colorAvailable: boolean): Project[] {
   return (
     (rows ?? []) as { id: string; name: string; icon: string; description: string; created_at: string }[]
-  ).map((p) => ({
-    ...p,
-    parent_project_id: null,
-    sync_origin: "local",
-  }));
+  ).map((p) => {
+    const raw = p as unknown as {
+      id: string;
+      name: string;
+      icon: string;
+      description: string;
+      created_at: string;
+      parent_project_id?: string | null;
+      sync_origin?: string;
+      color?: string | null;
+    };
+    return {
+      id: raw.id,
+      name: raw.name,
+      icon: raw.icon,
+      description: raw.description,
+      created_at: raw.created_at,
+      parent_project_id: driveAvailable ? (raw.parent_project_id ?? null) : null,
+      sync_origin: driveAvailable ? (raw.sync_origin ?? "local") : "local",
+      color: colorAvailable ? (raw.color ?? null) : null,
+    };
+  });
 }
 
 export default async function Dashboard({
@@ -120,6 +162,7 @@ export default async function Dashboard({
     createdAt: p.created_at,
     parentProjectId: p.parent_project_id,
     syncOrigin: p.sync_origin,
+    color: p.color,
   }));
   const projectTree = buildProjectTree(projectsFull);
   const countsByProjectId = rollUpProjectCounts(projectTree, Object.fromEntries(counts)); // Map no es serializable al pasarlo a un Client Component
@@ -198,6 +241,7 @@ export default async function Dashboard({
                 description: activeProject.description,
                 createdAt: activeProject.createdAt,
                 syncOrigin: activeProject.syncOrigin,
+                color: activeProject.color,
               }}
               subfolderCount={subfolders.length}
               transcriptionCount={items.length}
