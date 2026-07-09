@@ -6,7 +6,21 @@ export default function AjustesLoading() {
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
       <Skeleton className="h-8 w-32" />
       <Skeleton className="mt-2 h-4 w-64" />
-      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="h-9 w-9 rounded-lg" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-full max-w-sm" />
+          </div>
+        </div>
+        <div className="mt-4 flex gap-4">
+          <Skeleton className="h-16 w-32" />
+          <Skeleton className="h-16 w-32" />
+          <Skeleton className="h-16 w-32" />
+        </div>
+      </div>
+      <div className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-2.5">
           <Skeleton className="h-9 w-9 rounded-lg" />
           <div className="flex-1 space-y-2">

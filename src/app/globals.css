@@ -1,16 +1,47 @@
 @import "tailwindcss";
 
-/* La app está diseñada en modo claro. Forzamos light para que se vea
-   consistente aunque el sistema del usuario esté en modo oscuro. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Tokens semánticos — light (valores = paleta actual de la app, sin cambios visuales)
+   y dark (elección propia: gris frío, nunca negro/blanco puro). `next-themes` alterna
+   agregando/sacando la clase `.dark` en <html> (ver `ThemeProvider` en layout.tsx). */
 :root {
-  color-scheme: light;
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-secondary: #f1f5f9;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --accent: #4f46e5;
+  --accent-subtle: #eef2ff;
+  --accent-subtle-text: #4338ca;
+  --overlay: rgb(15 23 42 / 40%);
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --surface: #1e293b;
+  --surface-secondary: #334155;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --border: #334155;
+  --border-strong: #475569;
+  --accent: #818cf8;
+  --accent-subtle: rgb(99 102 241 / 18%);
+  --accent-subtle-text: #c7d2fe;
+  --overlay: rgb(2 6 23 / 60%);
 }
 
 @theme {
   /* Paleta de marca — alias semántico sobre la escala indigo (mismo valor final,
-     un solo lugar para ajustar el tono de marca en el futuro sin tocar componentes). */
+     un solo lugar para ajustar el tono de marca en el futuro sin tocar componentes).
+     Los botones/logo sólidos (bg-brand-600) se mantienen fijos en ambos temas —
+     un indigo vívido funciona igual de bien sobre fondo claro u oscuro. Para texto/
+     íconos/bordes de acento que SÍ necesitan ajustarse por contraste según el tema,
+     usar el token --color-accent (ver @theme inline más abajo), no brand-* directo. */
   --color-brand-50: #eef2ff;
   --color-brand-100: #e0e7ff;
   --color-brand-200: #c7d2fe;
@@ -39,6 +70,16 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-subtle-text: var(--accent-subtle-text);
+  --color-overlay: var(--overlay);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -48,9 +89,10 @@ body {
   color: var(--foreground);
 }
 
-/* Anillo de foco consistente para toda la app (accesibilidad de teclado). */
+/* Anillo de foco consistente para toda la app (accesibilidad de teclado). Atado a
+   --color-accent (no a brand-500 fijo) para tener suficiente contraste en ambos temas. */
 :focus-visible {
-  outline: 2px solid var(--color-brand-500);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: 4px;
 }

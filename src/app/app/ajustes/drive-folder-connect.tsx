@@ -171,13 +171,13 @@ export function DriveFolderConnect() {
   return (
     <Modal onClose={closeModal} closeOnBackdrop={!connecting} labelledBy="drive-connect-title">
       <div className="flex items-center justify-between">
-        <h3 id="drive-connect-title" className="font-semibold text-slate-900">
+        <h3 id="drive-connect-title" className="font-semibold text-foreground">
           Conectar carpeta de Drive
         </h3>
         <button
           onClick={closeModal}
           disabled={connecting}
-          className="rounded-md px-2 py-1 text-slate-400 transition hover:bg-slate-100 disabled:opacity-40"
+          className="rounded-md px-2 py-1 text-tertiary transition hover:bg-surface-secondary disabled:opacity-40"
           aria-label="Cerrar"
         >
           ✕
@@ -185,7 +185,7 @@ export function DriveFolderConnect() {
       </div>
 
       {!summary && (
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-tertiary">
           Entrá a una carpeta puntual de Drive (o creá una nueva) y conectala: se importa esa carpeta junto con
           toda su jerarquía de subcarpetas y notas .md.
         </p>
@@ -196,18 +196,18 @@ export function DriveFolderConnect() {
           <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-medium text-emerald-700">
             <span aria-hidden="true">✓</span> Carpeta conectada
           </p>
-          <ul className="space-y-1 text-slate-600">
+          <ul className="space-y-1 text-secondary">
             <li>
               {summary.imported.projects} subcarpeta(s) y {summary.imported.transcriptions} nota(s) importadas.
             </li>
             {(summary.skipped.existingFolders > 0 || summary.skipped.existingFiles > 0) && (
-              <li className="text-slate-500">
+              <li className="text-tertiary">
                 {summary.skipped.existingFolders} carpeta(s) y {summary.skipped.existingFiles} nota(s) ya estaban
                 importadas — no se duplicaron.
               </li>
             )}
             {summary.skipped.otherFiles > 0 && (
-              <li className="text-slate-500">
+              <li className="text-tertiary">
                 {summary.skipped.otherFiles} archivo(s) que no son carpeta ni .md se ignoraron.
               </li>
             )}
@@ -224,18 +224,18 @@ export function DriveFolderConnect() {
       ) : (
         <>
           {/* Breadcrumb */}
-          <nav className="mt-3 flex flex-wrap items-center gap-1 text-xs text-slate-500" aria-label="Ubicación en Drive">
+          <nav className="mt-3 flex flex-wrap items-center gap-1 text-xs text-tertiary" aria-label="Ubicación en Drive">
             {crumbs.map((c, i) => (
               <span key={c.id} className="flex items-center gap-1">
                 {i > 0 && (
-                  <span className="text-slate-300" aria-hidden="true">
+                  <span className="text-tertiary" aria-hidden="true">
                     /
                   </span>
                 )}
                 <button
                   onClick={() => goToCrumb(i)}
                   disabled={i === crumbs.length - 1 || connecting}
-                  className={i === crumbs.length - 1 ? "font-semibold text-slate-700" : "hover:underline"}
+                  className={i === crumbs.length - 1 ? "font-semibold text-secondary" : "hover:underline"}
                 >
                   {c.name}
                 </button>
@@ -245,25 +245,25 @@ export function DriveFolderConnect() {
 
           {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 
-          <div className="mt-2 max-h-64 min-h-[6rem] overflow-y-auto rounded-lg border border-slate-200">
+          <div className="mt-2 max-h-64 min-h-[6rem] overflow-y-auto rounded-lg border border-border">
             {loading ? (
-              <p className="flex items-center justify-center gap-2 p-4 text-sm text-slate-500">
+              <p className="flex items-center justify-center gap-2 p-4 text-sm text-tertiary">
                 <Spinner size="xs" /> Cargando…
               </p>
             ) : folders.length === 0 ? (
-              <p className="p-4 text-center text-sm text-slate-500">Sin subcarpetas acá.</p>
+              <p className="p-4 text-center text-sm text-tertiary">Sin subcarpetas acá.</p>
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-border">
                 {folders.map((f) => (
                   <li key={f.id}>
                     <button
                       onClick={() => enterFolder(f)}
                       disabled={connecting}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary transition hover:bg-background disabled:opacity-50"
                     >
                       <span aria-hidden="true">📁</span>
                       <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                      <span className="text-slate-300" aria-hidden="true">
+                      <span className="text-tertiary" aria-hidden="true">
                         ›
                       </span>
                     </button>
@@ -288,7 +288,7 @@ export function DriveFolderConnect() {
                   disabled={creatingFolder}
                   placeholder="Nombre de la carpeta"
                   aria-label="Nombre de la carpeta nueva"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-brand-500 focus:outline-none disabled:opacity-50"
+                  className="w-full rounded-lg border border-border-strong px-3 py-1.5 text-sm text-secondary focus:border-accent focus:outline-none disabled:opacity-50"
                 />
                 <Button size="sm" onClick={submitCreateFolder} loading={creatingFolder}>
                   Crear
@@ -301,7 +301,7 @@ export function DriveFolderConnect() {
               <button
                 onClick={toggleCreateForm}
                 disabled={connecting || loading}
-                className="text-xs font-medium text-brand-600 transition hover:underline disabled:opacity-50"
+                className="text-xs font-medium text-accent transition hover:underline disabled:opacity-50"
               >
                 ➕ Crear carpeta nueva acá
               </button>
@@ -310,7 +310,7 @@ export function DriveFolderConnect() {
           </div>
 
           {canConnect ? (
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-tertiary">
               Se importa &quot;{current.name}&quot; con toda su jerarquía de subcarpetas y notas .md.
             </p>
           ) : (

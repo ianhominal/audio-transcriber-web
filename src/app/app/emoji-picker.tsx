@@ -59,7 +59,7 @@ export function EmojiPicker({
         aria-label="Elegir ícono"
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex h-9 w-10 items-center justify-center rounded-lg border border-slate-300 text-lg transition hover:border-brand-400"
+        className="flex h-9 w-10 items-center justify-center rounded-lg border border-border-strong text-lg transition hover:border-accent"
       >
         {value || "📁"}
       </button>
@@ -77,7 +77,7 @@ export function EmojiPicker({
             }}
             // z-50: mismo motivo que IconMenu — puede abrirse desde dentro del drawer mobile
             // (z-40) y necesita quedar por encima.
-            className="z-50 grid grid-cols-6 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+            className="z-50 grid grid-cols-6 gap-1 rounded-xl border border-border bg-surface p-2 shadow-lg"
           >
             {EMOJIS.map((e) => (
               <button
@@ -90,7 +90,7 @@ export function EmojiPicker({
                   onChange(e);
                   setOpen(false);
                 }}
-                className={`rounded p-1 text-lg transition hover:bg-slate-100 ${value === e ? "bg-brand-100" : ""}`}
+                className={`rounded p-1 text-lg transition hover:bg-surface-secondary ${value === e ? "bg-accent-subtle" : ""}`}
               >
                 {e}
               </button>

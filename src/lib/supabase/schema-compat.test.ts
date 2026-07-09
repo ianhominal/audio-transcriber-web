@@ -6,6 +6,10 @@ import {
   markSchemaCompatResult,
   resetSchemaCompatCacheForTests,
   SCHEMA_COMPAT_CACHE_TTL_MS,
+  getProjectColorCompatSnapshot,
+  shouldRedetectProjectColorCompat,
+  markProjectColorCompatResult,
+  resetProjectColorCompatCacheForTests,
 } from "./schema-compat";
 
 describe("isMissingColumnError", () => {
@@ -101,5 +105,32 @@ describe("shouldRedetectSchemaCompat / markSchemaCompatResult (TTL)", () => {
   it("justo en el borde del TTL todavía no fuerza re-detección (comparación estricta '>')", () => {
     markSchemaCompatResult(true, 1_000);
     expect(shouldRedetectSchemaCompat(1_000 + SCHEMA_COMPAT_CACHE_TTL_MS)).toBe(false);
+  });
+});
+
+describe("cache de compat de projects.color (F2) es INDEPENDIENTE del de Drive-sync v2", () => {
+  beforeEach(() => {
+    resetSchemaCompatCacheForTests();
+    resetProjectColorCompatCacheForTests();
+  });
+
+  it("arranca sin detección todavía, igual que el otro cache", () => {
+    expect(getProjectColorCompatSnapshot()).toEqual({ available: null, checkedAt: 0 });
+    expect(shouldRedetectProjectColorCompat(1_000)).toBe(true);
+  });
+
+  it("marcar el cache de color no afecta al cache de Drive-sync v2, y viceversa", () => {
+    markProjectColorCompatResult(false, 1_000);
+    markSchemaCompatResult(true, 1_000);
+
+    expect(getProjectColorCompatSnapshot()).toEqual({ available: false, checkedAt: 1_000 });
+    expect(shouldRedetectSchemaCompat(1_000 + 500)).toBe(false);
+    // Color sigue "no disponible" y dentro del TTL, sin importar que Drive-sync v2 esté OK.
+    expect(shouldRedetectProjectColorCompat(1_000 + 500)).toBe(false);
+  });
+
+  it("respeta el mismo TTL que el cache de Drive-sync v2", () => {
+    markProjectColorCompatResult(true, 1_000);
+    expect(shouldRedetectProjectColorCompat(1_000 + SCHEMA_COMPAT_CACHE_TTL_MS + 1)).toBe(true);
   });
 });

@@ -6,12 +6,53 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { validateProjectName } from "@/lib/format";
 import { collectProjectSubtreeIds, type ProjectParentLink } from "@/lib/drive/tree";
+import { resolveProjectColorId } from "@/lib/project-colors";
 import {
+  getProjectColorCompatSnapshot,
   getSchemaCompatSnapshot,
   isMissingColumnError,
+  markProjectColorCompatResult,
   markSchemaCompatResult,
+  shouldRedetectProjectColorCompat,
   shouldRedetectSchemaCompat,
 } from "@/lib/supabase/schema-compat";
+
+/**
+ * Corre una escritura (`insert`/`update`) de `projects` con `color`, según disponibilidad de esa
+ * columna (F2, `supabase/migrations/20260709200000_project_color.sql`) — mismo patrón que
+ * `fetchActiveProjectParentLinksCompat` en `/api/sync/push` para Drive-sync v2: consulta el cache
+ * compartido (`schema-compat.ts`) PRIMERO en vez de intentar siempre con `color` y solo caer al
+ * fallback ante un `42703`, así el camino feliz en estado estable (columna ya disponible o ya
+ * confirmada ausente) paga un solo round-trip en vez de dos. `color` es puramente decorativo, así
+ * que degradar en silencio es preferible a bloquear al usuario (a diferencia de
+ * `parent_project_id`, que si falta cambia el comportamiento real y sí amerita un mensaje
+ * explícito).
+ */
+async function withColorFallback<T>(
+  // `PromiseLike`, no `Promise`: los query builders de Supabase (`PostgrestFilterBuilder`/
+  // `PostgrestBuilder`) son "thenables" (implementan `.then()`) pero no `Promise` reales (no
+  // tienen `.catch()`/`.finally()`), que es justo lo que se le pasa acá sin resolver todavía.
+  run: (includeColor: boolean) => PromiseLike<{ data: T | null; error: unknown }>
+): Promise<{ data: T | null; error: unknown }> {
+  const now = Date.now();
+  const cached = getProjectColorCompatSnapshot();
+  const useReducedDirectly = cached.available === false && !shouldRedetectProjectColorCompat(now);
+
+  if (useReducedDirectly) return run(false);
+
+  const attempt = await run(true);
+  if (!attempt.error) {
+    markProjectColorCompatResult(true, now);
+    return attempt;
+  }
+
+  if (isMissingColumnError(attempt.error)) {
+    markProjectColorCompatResult(false, now);
+    return run(false);
+  }
+
+  return attempt;
+}
 
 /**
  * Columnas de Drive-sync v2 en `projects` (ver `src/lib/supabase/schema-compat.ts`): si
@@ -81,18 +122,22 @@ export async function createProject(formData: FormData): Promise<CreateProjectRe
   const { supabase, user } = await requireUser();
   const icon = String(formData.get("icon") ?? "").slice(0, 8);
   const description = String(formData.get("description") ?? "").slice(0, 2000);
+  const color = resolveProjectColorId(formData.get("color"));
 
-  const { data, error } = await supabase
-    .from("projects")
-    .insert({
-      user_id: user.id,
-      name: parsed.value,
-      title: parsed.value,
-      icon,
-      description,
-    })
-    .select("id")
-    .single();
+  const { data, error } = await withColorFallback<{ id: string }>((includeColor) =>
+    supabase
+      .from("projects")
+      .insert({
+        user_id: user.id,
+        name: parsed.value,
+        title: parsed.value,
+        icon,
+        description,
+        ...(includeColor ? { color } : {}),
+      })
+      .select("id")
+      .single()
+  );
   if (error || !data) return { ok: false, error: "No se pudo crear el proyecto." };
 
   revalidatePath("/app");
@@ -111,26 +156,31 @@ export async function createSubproject(
   parentId: string,
   name: string,
   description?: string,
-  icon?: string
+  icon?: string,
+  color?: string | null
 ): Promise<CreateProjectResult> {
   const parsed = validateProjectName(name);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   const { supabase, user } = await requireUser();
+  const resolvedColor = resolveProjectColorId(color);
 
-  const { data, error } = await supabase
-    .from("projects")
-    .insert({
-      user_id: user.id,
-      name: parsed.value,
-      title: parsed.value,
-      icon: (icon ?? "📁").slice(0, 8),
-      description: (description ?? "").slice(0, 2000),
-      parent_project_id: parentId,
-      sync_origin: "local",
-    })
-    .select("id")
-    .single();
+  const { data, error } = await withColorFallback<{ id: string }>((includeColor) =>
+    supabase
+      .from("projects")
+      .insert({
+        user_id: user.id,
+        name: parsed.value,
+        title: parsed.value,
+        icon: (icon ?? "📁").slice(0, 8),
+        description: (description ?? "").slice(0, 2000),
+        parent_project_id: parentId,
+        sync_origin: "local",
+        ...(includeColor ? { color: resolvedColor } : {}),
+      })
+      .select("id")
+      .single()
+  );
 
   if (error) {
     if (isMissingColumnError(error)) {
@@ -160,23 +210,37 @@ export async function updateProjectDescription(id: string, description: string):
   return { ok: true };
 }
 
+/**
+ * `icon`/`color` son OPTIONAL en el sentido de `buildProjectRow` (ver `schema-compat.ts`):
+ * `undefined` = no tocar ese campo, cualquier otro valor (incluido `null` para `color` = "sin
+ * color"/neutro) = pisarlo. `color` inválido se sanea a `null` vía `resolveProjectColorId` en vez
+ * de dejar pasar un string arbitrario al `update` (defensa en profundidad además del `CHECK` de
+ * la migración).
+ */
 export async function renameProject(
   id: string,
   name: string,
-  icon?: string
+  icon?: string,
+  color?: string | null
 ): Promise<ActionResult> {
   const parsed = validateProjectName(name);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
   const { supabase } = await requireUser();
-  const update: Record<string, string> = {
+  const baseUpdate: Record<string, string | null> = {
     name: parsed.value,
     title: parsed.value,
     updated_at: new Date().toISOString(),
   };
-  if (icon !== undefined) update.icon = icon.slice(0, 8);
+  if (icon !== undefined) baseUpdate.icon = icon.slice(0, 8);
+  const resolvedColor = color !== undefined ? resolveProjectColorId(color) : undefined;
 
-  const { error } = await supabase.from("projects").update(update).eq("id", id);
+  const { error } = await withColorFallback((includeColor) =>
+    supabase
+      .from("projects")
+      .update(resolvedColor !== undefined && includeColor ? { ...baseUpdate, color: resolvedColor } : baseUpdate)
+      .eq("id", id)
+  );
   if (error) return { ok: false, error: "No se pudo renombrar el proyecto." };
 
   revalidatePath("/app");
@@ -185,21 +249,45 @@ export async function renameProject(
 
 export async function duplicateProject(id: string): Promise<ActionResult> {
   const { supabase, user } = await requireUser();
-  const { data: orig } = await supabase
-    .from("projects")
-    .select("name, icon, description")
-    .eq("id", id)
-    .single();
+
+  // Lectura con el mismo cache de compat que la escritura (`withColorFallback` arriba): consulta
+  // el cache PRIMERO en vez de intentar siempre con `color` y caer al fallback recién ante un
+  // `42703` — mismo criterio de un solo round-trip en estado estable.
+  const now = Date.now();
+  const colorCached = getProjectColorCompatSnapshot();
+  const colorKnownUnavailable = colorCached.available === false && !shouldRedetectProjectColorCompat(now);
+
+  type OrigRow = { name: string; icon: string; description: string; color: string | null };
+  let orig: OrigRow | null = null;
+
+  if (colorKnownUnavailable) {
+    const reduced = await supabase.from("projects").select("name, icon, description").eq("id", id).single();
+    if (reduced.data) orig = { ...reduced.data, color: null };
+  } else {
+    const full = await supabase.from("projects").select("name, icon, description, color").eq("id", id).single();
+    if (!full.error && full.data) {
+      markProjectColorCompatResult(true, now);
+      orig = full.data as OrigRow;
+    } else if (full.error && isMissingColumnError(full.error)) {
+      markProjectColorCompatResult(false, now);
+      const reduced = await supabase.from("projects").select("name, icon, description").eq("id", id).single();
+      if (reduced.data) orig = { ...reduced.data, color: null };
+    }
+  }
   if (!orig) return { ok: false, error: "No se encontró el proyecto." };
+  const original = orig;
 
   // Duplica la carpeta (no las transcripciones que contiene).
-  const { error } = await supabase.from("projects").insert({
-    user_id: user.id,
-    name: `Copia de ${orig.name}`,
-    title: `Copia de ${orig.name}`,
-    icon: orig.icon ?? "",
-    description: orig.description ?? "",
-  });
+  const { error } = await withColorFallback((includeColor) =>
+    supabase.from("projects").insert({
+      user_id: user.id,
+      name: `Copia de ${original.name}`,
+      title: `Copia de ${original.name}`,
+      icon: original.icon ?? "",
+      description: original.description ?? "",
+      ...(includeColor ? { color: original.color } : {}),
+    })
+  );
   if (error) return { ok: false, error: "No se pudo duplicar el proyecto." };
 
   revalidatePath("/app");

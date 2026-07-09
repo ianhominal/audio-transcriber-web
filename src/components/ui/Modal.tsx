@@ -113,7 +113,7 @@ export function Modal({
   // drawer, aunque se abra anidado dentro de ellos.
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 sm:items-center sm:px-4"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-overlay sm:items-center sm:px-4"
       onClick={closeOnBackdrop ? onClose : undefined}
     >
       <div
@@ -123,7 +123,7 @@ export function Modal({
         aria-labelledby={labelledBy}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="animate-sheet-up max-h-[88vh] w-full overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-5 pt-2 shadow-xl outline-none sm:max-h-[85vh] sm:w-full sm:max-w-md sm:animate-none sm:rounded-2xl sm:pt-5"
+        className="animate-sheet-up max-h-[88vh] w-full overflow-y-auto rounded-t-2xl border border-border bg-surface p-5 pt-2 shadow-xl outline-none sm:max-h-[85vh] sm:w-full sm:max-w-md sm:animate-none sm:rounded-2xl sm:pt-5"
       >
         <div
           onTouchStart={onHandleTouchStart}
@@ -132,7 +132,7 @@ export function Modal({
           className="-mx-5 -mt-2 mb-3 flex justify-center pt-2 pb-3 sm:hidden"
           aria-hidden="true"
         >
-          <span className="h-1.5 w-10 rounded-full bg-slate-300" />
+          <span className="h-1.5 w-10 rounded-full bg-border-strong" />
         </div>
         {children}
       </div>

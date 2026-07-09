@@ -146,12 +146,12 @@ export function InstallPrompt() {
   return createPortal(
     <div
       role="status"
-      className="animate-toast-in fixed inset-x-4 bottom-4 z-20 flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg sm:inset-x-auto sm:right-4 sm:max-w-sm"
+      className="animate-toast-in fixed inset-x-4 bottom-4 z-20 flex items-start gap-3 rounded-2xl border border-border bg-surface p-4 shadow-lg sm:inset-x-auto sm:right-4 sm:max-w-sm"
     >
       <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white" aria-hidden="true">
         <WaveIcon />
       </span>
-      <div className="min-w-0 flex-1 text-sm text-slate-700">
+      <div className="min-w-0 flex-1 text-sm text-secondary">
         {platform === "ios" ? (
           <p>
             Instalá Audio Transcriber: tocá <ShareIcon /> <strong className="font-semibold">Compartir</strong> y luego{" "}
@@ -170,7 +170,7 @@ export function InstallPrompt() {
         type="button"
         onClick={close}
         aria-label="Cerrar aviso de instalación"
-        className="tap-target -my-2 -mr-2 flex shrink-0 items-center justify-center rounded text-slate-400 transition hover:text-slate-600"
+        className="tap-target -my-2 -mr-2 flex shrink-0 items-center justify-center rounded text-tertiary transition-colors duration-150 ease-out hover:text-secondary"
       >
         ✕
       </button>
@@ -200,7 +200,7 @@ function ShareIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="inline-block -translate-y-px text-brand-600"
+      className="inline-block -translate-y-px text-accent"
       aria-hidden="true"
     >
       <path d="M12 3v12" />

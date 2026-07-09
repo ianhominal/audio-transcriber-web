@@ -67,7 +67,7 @@ export function IconMenu({
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="tap-target flex items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+        className="tap-target flex items-center justify-center rounded-md text-tertiary transition hover:bg-border hover:text-secondary"
       >
         ⋯
       </button>
@@ -86,7 +86,7 @@ export function IconMenu({
             // z-50: por encima del drawer mobile (z-40, `dashboard-shell.tsx`), porque este
             // popover se abre habitualmente desde el sidebar de proyectos que vive DENTRO del
             // drawer en mobile — con z-30 quedaba tapado/inclickeable detrás del drawer.
-            className="z-50 rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-lg"
+            className="z-50 rounded-xl border border-border bg-surface p-1 text-sm shadow-lg"
           >
             {children(close)}
           </div>,
@@ -115,8 +115,8 @@ export function MenuItem({
         e.stopPropagation();
         onClick();
       }}
-      className={`block w-full rounded-md px-3 py-1.5 text-left transition hover:bg-slate-100 ${
-        danger ? "text-red-600 hover:bg-red-50" : "text-slate-700"
+      className={`block w-full rounded-md px-3 py-1.5 text-left transition hover:bg-surface-secondary ${
+        danger ? "text-red-600 hover:bg-red-50" : "text-secondary"
       }`}
     >
       {children}

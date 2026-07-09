@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSubproject } from "./actions";
 import { EmojiPicker } from "./emoji-picker";
+import { ProjectColorPicker } from "./project-color-picker";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -29,6 +30,7 @@ export function NewSubfolderButton({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("📁");
+  const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -36,6 +38,7 @@ export function NewSubfolderButton({
     setName("");
     setDescription("");
     setIcon("📁");
+    setColor(null);
     setError(null);
   }
 
@@ -46,7 +49,7 @@ export function NewSubfolderButton({
 
   async function submit() {
     setPending(true);
-    const res = await createSubproject(parentId, name, description, icon);
+    const res = await createSubproject(parentId, name, description, icon, color);
     setPending(false);
     if (!res.ok) {
       setError(res.error);
@@ -74,11 +77,12 @@ export function NewSubfolderButton({
       </Button>
       {open && (
         <Modal onClose={close} labelledBy="new-subfolder-title">
-          <h2 id="new-subfolder-title" className="text-lg font-semibold text-slate-900">
+          <h2 id="new-subfolder-title" className="text-lg font-semibold text-foreground">
             Nueva carpeta
           </h2>
           <div className="mt-4 flex gap-2">
             <EmojiPicker value={icon} onChange={setIcon} />
+            <ProjectColorPicker value={color} onChange={setColor} />
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -88,7 +92,7 @@ export function NewSubfolderButton({
               onKeyDown={(e) => {
                 if (e.key === "Enter") submit();
               }}
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400"
+              className="min-w-0 flex-1 rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent"
             />
           </div>
           <textarea
@@ -97,7 +101,7 @@ export function NewSubfolderButton({
             rows={3}
             placeholder="Contexto o descripción (opcional)…"
             aria-label="Contexto o descripción de la carpeta"
-            className="mt-3 w-full resize-y rounded-lg border border-slate-300 p-2.5 text-sm text-slate-700 focus:border-brand-400 focus:outline-none"
+            className="mt-3 w-full resize-y rounded-lg border border-border-strong p-2.5 text-sm text-secondary focus:border-accent focus:outline-none"
           />
           {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
           <div className="mt-4 flex justify-end gap-2">

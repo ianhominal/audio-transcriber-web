@@ -15,6 +15,10 @@ export type ProjectTreeInput = {
   icon: string;
   parentProjectId: string | null;
   syncOrigin: string;
+  /** Color de acento del proyecto (Fase F2, id semántico de `src/lib/project-colors.ts`); `null`/
+   * ausente = sin color/neutro. Opcional para no romper callers/tests que arman objetos sin
+   * pensar en color (ej. los de `tree.test.ts` que solo ejercitan la jerarquía). */
+  color?: string | null;
 };
 
 export type ProjectTreeNode = ProjectTreeInput & { children: ProjectTreeNode[] };

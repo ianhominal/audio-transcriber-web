@@ -5,11 +5,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { IconMenu, MenuItem } from "./icon-menu";
 import { EmojiPicker } from "./emoji-picker";
+import { ProjectColorPicker } from "./project-color-picker";
 import { renameProject, duplicateProject, deleteProject } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { getProjectColor } from "@/lib/project-colors";
 
-type Subfolder = { id: string; name: string; icon: string; syncOrigin?: string };
+type Subfolder = { id: string; name: string; icon: string; syncOrigin?: string; color?: string | null };
 
 /**
  * Tile de subcarpeta dentro del panel del explorador (estilo "carpeta" de un explorador de
@@ -30,11 +32,13 @@ export function SubfolderCard({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(folder.name);
   const [icon, setIcon] = useState(folder.icon || "📁");
+  const [color, setColor] = useState<string | null>(folder.color ?? null);
   const [busy, setBusy] = useState(false);
+  const folderColor = getProjectColor(folder.color);
 
   async function saveRename() {
     setBusy(true);
-    const res = await renameProject(folder.id, name, icon);
+    const res = await renameProject(folder.id, name, icon, color);
     setBusy(false);
     if (res.ok) {
       setEditing(false);
@@ -69,8 +73,9 @@ export function SubfolderCard({
 
   if (editing) {
     return (
-      <div className="flex items-center gap-1.5 rounded-xl border border-brand-300 bg-brand-50/40 p-3">
+      <div className="flex items-center gap-1.5 rounded-xl border border-accent bg-accent-subtle p-3">
         <EmojiPicker value={icon} onChange={setIcon} />
+        <ProjectColorPicker value={color} onChange={setColor} />
         <input
           value={name}
           autoFocus
@@ -80,7 +85,7 @@ export function SubfolderCard({
             if (e.key === "Enter") saveRename();
             if (e.key === "Escape") setEditing(false);
           }}
-          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-brand-400"
+          className="min-w-0 flex-1 rounded-md border border-border-strong px-2 py-1 text-sm focus:border-accent"
         />
         <Button size="sm" onClick={saveRename} loading={busy} className="px-2.5 py-1">
           OK
@@ -90,21 +95,28 @@ export function SubfolderCard({
   }
 
   return (
-    <div className="group relative flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-brand-300 hover:shadow-sm">
+    <div className="group relative flex items-center gap-3 rounded-xl border border-border bg-surface p-3 transition hover:border-accent hover:shadow-sm">
       <Link href={`/app?project=${folder.id}`} className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-xl">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent-subtle text-xl">
           {folder.icon || "📁"}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
-            <span className="truncate font-semibold text-slate-800">{folder.name}</span>
+            <span className="truncate font-semibold text-foreground">{folder.name}</span>
+            {folderColor && (
+              <span
+                title={folderColor.label}
+                aria-hidden="true"
+                className={`h-2 w-2 shrink-0 rounded-full ${folderColor.dot}`}
+              />
+            )}
             {folder.syncOrigin === "drive" && (
               <span title="Sincronizado con Google Drive" className="shrink-0 text-xs leading-none">
                 ☁️
               </span>
             )}
           </span>
-          <span className="block truncate text-xs text-slate-500">{metaParts.join(" · ")}</span>
+          <span className="block truncate text-xs text-tertiary">{metaParts.join(" · ")}</span>
         </span>
       </Link>
       {/* En touch no hay `:hover`, así que `opacity-0 group-hover:opacity-100` dejaba el menú

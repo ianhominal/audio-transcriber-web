@@ -55,12 +55,12 @@ export function UnassignedProjectLink({ active, count }: { active: boolean; coun
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-        active ? "bg-brand-50 font-semibold text-brand-700" : "text-slate-700 hover:bg-slate-100"
-      } ${dragOver ? "bg-brand-100 ring-2 ring-inset ring-brand-400" : ""}`}
+        active ? "bg-accent-subtle font-semibold text-accent-subtle-text" : "text-secondary hover:bg-surface-secondary"
+      } ${dragOver ? "bg-accent-subtle ring-2 ring-inset ring-accent" : ""}`}
     >
       <span className="text-base leading-none">📄</span>
       <span className="min-w-0 flex-1 truncate">Sin proyecto</span>
-      <span className="shrink-0 text-xs tabular-nums text-slate-500">{count}</span>
+      <span className="shrink-0 text-xs tabular-nums text-tertiary">{count}</span>
     </Link>
   );
 }

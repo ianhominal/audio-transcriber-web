@@ -16,7 +16,7 @@ export default async function Landing() {
   const cta = "Probar gratis";
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
+    <main className="min-h-screen bg-background text-foreground">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5 sm:px-5">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
@@ -31,9 +31,9 @@ export default async function Landing() {
 
       <section className="mx-auto max-w-3xl px-4 pt-16 pb-10 text-center sm:px-5 sm:pt-24">
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-          Tus audios, convertidos en <span className="text-brand-600">texto</span> en segundos.
+          Tus audios, convertidos en <span className="text-accent">texto</span> en segundos.
         </h1>
-        <p className="mx-auto mt-5 max-w-xl text-lg text-slate-600">
+        <p className="mx-auto mt-5 max-w-xl text-lg text-secondary">
           Esa nota de voz de dos minutos que no tenés ganas de escuchar: subila y leela en segundos.
           Notas de WhatsApp, reuniones, clases, lo que sea. Español, inglés y más.
         </p>
@@ -42,7 +42,7 @@ export default async function Landing() {
             {cta}
           </Link>
         </div>
-        <p className="mt-4 text-sm text-slate-500">Gratis para empezar · sin tarjeta</p>
+        <p className="mt-4 text-sm text-tertiary">Gratis para empezar · sin tarjeta</p>
       </section>
 
       <section className="mx-auto grid max-w-4xl gap-4 px-4 pb-20 sm:grid-cols-3 sm:px-5">
@@ -56,12 +56,12 @@ export default async function Landing() {
 
 function Feature({ icon, title, desc }: { icon: string; title: string; desc: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
       <span className="text-xl" aria-hidden="true">
         {icon}
       </span>
       <h3 className="mt-2 font-semibold">{title}</h3>
-      <p className="mt-1 text-sm text-slate-600">{desc}</p>
+      <p className="mt-1 text-sm text-secondary">{desc}</p>
     </div>
   );
 }
