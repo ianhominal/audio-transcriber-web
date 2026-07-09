@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
 import { getDriveConnectionStatusCompat } from "@/lib/drive/connection-status-compat";
 import { getUserSettings } from "@/lib/settings/user-settings";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { DriveFolderConnect } from "./drive-folder-connect";
 import { TranscriptionDefaultsSection } from "./transcription-defaults";
 
@@ -62,6 +63,25 @@ export default async function AjustesPage({
           <span>{message.text}</span>
         </div>
       )}
+
+      {/* Apariencia: el selector de tema (claro/sistema/oscuro) vivía suelto en el header del
+          dashboard (`app/layout.tsx`) — se movió acá para que sea una opción más de Ajustes,
+          integrada con el resto (Transcripción, Google Drive). El control sigue siendo el mismo
+          `ThemeToggle` (next-themes + guard de `mounted` contra hydration mismatch). */}
+      <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
+              🎨
+            </span>
+            <div>
+              <h2 className="font-semibold text-foreground">Apariencia</h2>
+              <p className="text-sm text-tertiary">Elegí el tema de la interfaz.</p>
+            </div>
+          </div>
+          <ThemeToggle />
+        </div>
+      </section>
 
       {transcriptionDefaults && (
         <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">

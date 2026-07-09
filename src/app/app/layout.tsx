@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ToastProvider } from "@/components/ui/Toast";
 import { InstallPrompt } from "@/components/install-prompt";
-import { ThemeToggle } from "@/components/theme-toggle";
 import LogoutButton from "./logout-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -44,7 +43,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <span className="hidden truncate text-sm text-tertiary md:inline md:max-w-[12rem]" title={user.email}>
                 {user.email}
               </span>
-              <ThemeToggle />
               <LogoutButton />
             </nav>
           </div>
