@@ -17,6 +17,9 @@ const COLUMNS_WITH_TRANSLATION = `${BASE_COLUMNS}, translated_to, original_text`
 // `summary`/`summary_source_hash` (Fase F5, ver supabase/migrations/20260709220000_transcription_summary.sql)
 // — mismo criterio de compat que arriba, un nivel de cascada más.
 const COLUMNS_WITH_SUMMARY = `${COLUMNS_WITH_TRANSLATION}, summary, summary_source_hash`;
+// `vocabulary_corrected` (vocabulario custom, ver supabase/migrations/20260710120000_user_vocabulary.sql)
+// — mismo criterio de compat, un nivel de cascada más.
+const COLUMNS_WITH_VOCABULARY = `${COLUMNS_WITH_SUMMARY}, vocabulary_corrected`;
 
 export default async function TranscriptionPage({
   params,
@@ -29,7 +32,7 @@ export default async function TranscriptionPage({
   const [transcriptionResult, { data: projectsData }] = await Promise.all([
     supabase
       .from("transcriptions")
-      .select(COLUMNS_WITH_SUMMARY)
+      .select(COLUMNS_WITH_VOCABULARY)
       .eq("id", id)
       .is("deleted_at", null)
       .single(),
@@ -42,20 +45,38 @@ export default async function TranscriptionPage({
 
   let t = transcriptionResult.data;
   if (!t && isMissingColumnError(transcriptionResult.error)) {
-    const withTranslation = await supabase
+    const withSummary = await supabase
       .from("transcriptions")
-      .select(COLUMNS_WITH_TRANSLATION)
+      .select(COLUMNS_WITH_SUMMARY)
       .eq("id", id)
       .is("deleted_at", null)
       .single();
 
-    if (withTranslation.data) {
-      t = { ...withTranslation.data, summary: null, summary_source_hash: null };
-    } else if (isMissingColumnError(withTranslation.error)) {
-      const fallback = await supabase.from("transcriptions").select(BASE_COLUMNS).eq("id", id).is("deleted_at", null).single();
-      t = fallback.data
-        ? { ...fallback.data, translated_to: null, original_text: null, summary: null, summary_source_hash: null }
-        : null;
+    if (withSummary.data) {
+      t = { ...withSummary.data, vocabulary_corrected: null };
+    } else if (isMissingColumnError(withSummary.error)) {
+      const withTranslation = await supabase
+        .from("transcriptions")
+        .select(COLUMNS_WITH_TRANSLATION)
+        .eq("id", id)
+        .is("deleted_at", null)
+        .single();
+
+      if (withTranslation.data) {
+        t = { ...withTranslation.data, summary: null, summary_source_hash: null, vocabulary_corrected: null };
+      } else if (isMissingColumnError(withTranslation.error)) {
+        const fallback = await supabase.from("transcriptions").select(BASE_COLUMNS).eq("id", id).is("deleted_at", null).single();
+        t = fallback.data
+          ? {
+              ...fallback.data,
+              translated_to: null,
+              original_text: null,
+              summary: null,
+              summary_source_hash: null,
+              vocabulary_corrected: null,
+            }
+          : null;
+      }
     }
   }
 

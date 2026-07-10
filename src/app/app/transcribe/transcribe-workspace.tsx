@@ -76,10 +76,15 @@ export function TranscribeWorkspace({
   projects,
   initialProject = "",
   initialDefaults,
+  hasVocabulary = false,
 }: {
   projects: Project[];
   initialProject?: string;
   initialDefaults?: TranscriptionDefaults;
+  // Vocabulario custom (ver ROADMAP.md): true si el usuario ya cargó al menos un término en
+  // Ajustes → Vocabulario. Solo decide si se muestra el toggle de abajo — sin términos cargados no
+  // hay nada que activar/desactivar, así que ni se renderiza (mismo criterio que `hasOversize`).
+  hasVocabulary?: boolean;
 }) {
   const router = useRouter();
   const { show: toast } = useToast();
@@ -109,6 +114,11 @@ export function TranscribeWorkspace({
   // ver nota de alcance en el JSX más abajo.
   const [mode, setMode] = useState<TranscribeMode>(DEFAULT_TRANSCRIBE_MODE);
   const [targetLanguage, setTargetLanguage] = useState<TranslationLanguageCode>(DEFAULT_TRANSLATION_LANGUAGE);
+
+  // Corrección con vocabulario custom (ver ROADMAP.md): activada por defecto cuando hay términos
+  // cargados (`hasVocabulary`), con opción de desactivar puntualmente para esta tanda — igual que el
+  // modo de traducción, es una elección por tanda, no un default persistente.
+  const [useVocabulary, setUseVocabulary] = useState(true);
 
   const setLanguageAsDefault = async () => {
     try {
@@ -388,6 +398,7 @@ export function TranscribeWorkspace({
         form.append("model", model);
         form.append("mode", mode);
         if (mode === "translate") form.append("targetLanguage", targetLanguage);
+        form.append("useVocabulary", String(useVocabulary));
         // Toda la cola (archivos subidos y grabaciones) hereda el mismo proyecto destino del
         // lote, elegido en el selector de arriba.
         if (projectId) form.append("projectId", projectId);
@@ -586,6 +597,27 @@ export function TranscribeWorkspace({
             </div>
           )}
         </div>
+
+        {/* Vocabulario custom: corrección automática de nombres/jerga (feature diferencial #1, ver
+            .claude/resources/BUSINESS.md). Solo se muestra si el usuario cargó al menos un término
+            en Ajustes → Vocabulario — sin eso no hay nada que activar/desactivar. */}
+        {hasVocabulary && (
+          <div className="mt-4 border-t border-border pt-4">
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-secondary">📖 Corregir con tu vocabulario</span>
+              <input
+                type="checkbox"
+                checked={useVocabulary}
+                onChange={(e) => setUseVocabulary(e.target.checked)}
+                aria-label="Corregir automáticamente con tu vocabulario"
+                className="h-4 w-4 shrink-0 accent-accent"
+              />
+            </label>
+            <p className="mt-1 text-xs text-tertiary">
+              Corrige sola los nombres y términos de tu lista si quedaron mal en la transcripción.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Dropzone múltiple */}

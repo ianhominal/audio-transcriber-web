@@ -13,6 +13,8 @@ import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 import { resolveGroqModel } from "@/lib/transcribe/model";
 import { resolveTranscribeMode, resolveTranslationLanguage, translationLanguageLabel } from "@/lib/translate/languages";
 import { translateText } from "@/lib/translate/groq";
+import { listVocabularyTerms } from "@/lib/vocabulary/store";
+import { correctTextWithVocabulary } from "@/lib/vocabulary/groq";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
@@ -228,6 +230,51 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 2.6) Corrección con el vocabulario custom del usuario — feature diferencial #1 (nombres de
+  //      invitados recurrentes, marcas, jerga que el usuario siempre corrige a mano, ver
+  //      .claude/resources/BUSINESS.md). Corre sobre `finalText` (el texto FINAL: traducido si se
+  //      pidió traducción, o el transcripto tal cual si no), después de la traducción — mismo orden
+  //      que pidió el producto: transcribir → traducir → corregir.
+  //
+  //      Best-effort, mismo criterio que la traducción: si falla, el texto queda como estaba, nunca
+  //      se pierde ni se bloquea el request. Ahorro explícito: si el usuario no cargó NINGÚN término,
+  //      `listVocabularyTerms` devuelve `[]` y `correctTextWithVocabulary` ni siquiera intenta
+  //      contactar a Groq (ver su implementación) — cero costo para el usuario común que no usa esta
+  //      feature. `useVocabulary=false` (toggle "Corregir con tu vocabulario" en TranscribeWorkspace)
+  //      la desactiva por completo para esta tanda puntual sin gastar ni siquiera la lectura de la
+  //      tabla.
+  let vocabularyCorrected: boolean | null = null;
+  const useVocabulary = (form.get("useVocabulary") as string) !== "false";
+  if (useVocabulary) {
+    const terms = await listVocabularyTerms(supabase, user.id);
+    if (terms.length > 0) {
+      try {
+        const correction = await correctTextWithVocabulary(
+          finalText,
+          terms.map((t) => t.term),
+          apiKey
+        );
+        if (correction.ok) {
+          finalText = correction.text;
+          vocabularyCorrected = correction.corrected;
+        } else {
+          console.error("[transcribe] vocabulary correction failed", {
+            userId: user.id,
+            error: correction.error,
+          });
+          Sentry.captureException(new Error(correction.error), {
+            extra: { userId: user.id, stage: "vocabulary-correction" },
+          });
+        }
+      } catch (err) {
+        // Defensa en profundidad — `correctTextWithVocabulary` está documentada para nunca lanzar,
+        // mismo criterio que el try/catch extra alrededor de `translateText` más arriba.
+        console.error("[transcribe] vocabulary correction threw", err);
+        Sentry.captureException(err, { extra: { userId: user.id, stage: "vocabulary-correction" } });
+      }
+    }
+  }
+
   // 3) Subir el audio a Storage (bucket privado, carpeta del usuario). Best-effort:
   //    si falla la subida, igual guardamos el texto (sin audio).
   let audioPath: string | null = null;
@@ -293,21 +340,39 @@ export async function POST(req: NextRequest) {
       model,
     };
     // `translated_to`/`original_text` (Fase F4, ver supabase/migrations/20260709210000_translation.sql)
-    // se aplican automático recién al mergear a `main` (mismo criterio que `projects.color` en F2) —
-    // en el preview de esta branch pueden no existir todavía. Se intenta con las columnas nuevas
-    // primero y, ante un 42703 (columna inexistente), se reintenta sin ellas: la traducción SIGUE
-    // llegando al usuario en la respuesta de este request (`finalText`/`translationWarning`), solo
-    // no queda etiquetada en la fila hasta que la migración esté aplicada. A diferencia de
-    // `projects.color` en F2 (que usa el cache compartido de `schema-compat.ts` con TTL porque tiene
-    // muchos call-sites), acá se detecta por intento directo sin cache: la ventana de "migración sin
-    // aplicar" es corta y de bajo tráfico. OJO: hay OTRO retry de compat en el read-path del detalle
-    // (`app/t/[id]/page.tsx`) y en el dedupe de más arriba — todos independientes y sin cache a
-    // propósito; si esto se volviera caliente, valdría unificarlos en un cache compartido como F2.
+    // y `vocabulary_corrected` (feature de vocabulario custom, ver
+    // supabase/migrations/20260710120000_user_vocabulary.sql) se aplican automático recién al
+    // mergear a `main` (mismo criterio que `projects.color` en F2) — en el preview de esta branch
+    // pueden no existir todavía, e INDEPENDIENTEMENTE una de otra (F4 puede estar aplicada y
+    // vocabulario no, es el caso más común en el día a día). Se intenta con TODAS las columnas
+    // nuevas primero y, ante un 42703 (columna inexistente), se cae en cascada: primero sin
+    // `vocabulary_corrected`, después sin ninguna de las tres. En cualquier nivel, el texto final
+    // (traducido y/o corregido) SIGUE llegando al usuario en la respuesta de este request
+    // (`finalText`), solo no queda etiquetado en la fila hasta que la migración correspondiente esté
+    // aplicada. A diferencia de `projects.color` en F2 (que usa el cache compartido de
+    // `schema-compat.ts` con TTL porque tiene muchos call-sites), acá se detecta por intento directo
+    // sin cache: la ventana de "migración sin aplicar" es corta y de bajo tráfico. OJO: hay OTRO
+    // retry de compat en el read-path del detalle (`app/t/[id]/page.tsx`) y en el dedupe de más
+    // arriba — todos independientes y sin cache a propósito; si esto se volviera caliente, valdría
+    // unificarlos en un cache compartido como F2.
     let insertResult = await supabase
       .from("transcriptions")
-      .insert({ ...baseRow, translated_to: translatedTo, original_text: originalText })
+      .insert({
+        ...baseRow,
+        translated_to: translatedTo,
+        original_text: originalText,
+        vocabulary_corrected: vocabularyCorrected,
+      })
       .select("id")
       .single();
+
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      insertResult = await supabase
+        .from("transcriptions")
+        .insert({ ...baseRow, translated_to: translatedTo, original_text: originalText })
+        .select("id")
+        .single();
+    }
 
     if (insertResult.error && isMissingColumnError(insertResult.error)) {
       insertResult = await supabase.from("transcriptions").insert(baseRow).select("id").single();

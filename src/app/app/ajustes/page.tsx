@@ -2,9 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
 import { getDriveConnectionStatusCompat } from "@/lib/drive/connection-status-compat";
 import { getUserSettings } from "@/lib/settings/user-settings";
+import { listVocabularyTerms } from "@/lib/vocabulary/store";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DriveFolderConnect } from "./drive-folder-connect";
 import { TranscriptionDefaultsSection } from "./transcription-defaults";
+import { VocabularySection } from "./vocabulary-section";
 
 const DRIVE_STATUS_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Conectado con Google Drive." },
@@ -36,10 +38,15 @@ export default async function AjustesPage({
   // `status` distingue conexión ACTIVA de token revocado por Google (el usuario existe en
   // `drive_connections` pero ya no sirve) — ver migración `20260707140000_drive_connection_status.sql`
   // y `src/lib/drive/connection-status-compat.ts` (degrada a 'active' si la migración no corrió).
-  // Independiente de los defaults de transcripción — se piden en paralelo, no encadenados.
-  const [connectionStatus, transcriptionDefaults] = user
-    ? await Promise.all([getDriveConnectionStatusCompat(supabase, user.id), getUserSettings(supabase, user.id)])
-    : [null, null];
+  // Independiente de los defaults de transcripción y del vocabulario — se piden en paralelo, no
+  // encadenados.
+  const [connectionStatus, transcriptionDefaults, vocabularyTerms] = user
+    ? await Promise.all([
+        getDriveConnectionStatusCompat(supabase, user.id),
+        getUserSettings(supabase, user.id),
+        listVocabularyTerms(supabase, user.id),
+      ])
+    : [null, null, []];
   const isConnected = connectionStatus !== null;
   const isRevoked = connectionStatus === "revoked";
 
@@ -86,6 +93,12 @@ export default async function AjustesPage({
       {transcriptionDefaults && (
         <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
           <TranscriptionDefaultsSection initialDefaults={transcriptionDefaults} />
+        </section>
+      )}
+
+      {user && (
+        <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+          <VocabularySection initialTerms={vocabularyTerms} />
         </section>
       )}
 

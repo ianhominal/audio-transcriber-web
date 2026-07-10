@@ -42,6 +42,11 @@ type Transcription = {
   // opcionales acá por si algún caller viejo no los manda.
   translated_to?: string | null;
   original_text?: string | null;
+  // Vocabulario custom (ver ROADMAP.md): `true` si esta transcripción se corrigió con el
+  // vocabulario del usuario (y de verdad cambió algo, ver `correctTextWithVocabulary`), `false` si
+  // se intentó pero no hizo falta corregir nada, `null`/ausente si no aplica o la migración todavía
+  // no está aplicada.
+  vocabulary_corrected?: boolean | null;
 };
 
 type Project = { id: string; name: string; icon: string };
@@ -309,6 +314,7 @@ export function TranscriptionDetail({
         {transcription.translated_to && (
           <Badge tone="brand">🌐 Traducido a {translationLanguageLabel(transcription.translated_to)}</Badge>
         )}
+        {transcription.vocabulary_corrected && <Badge tone="brand">📖 Corregido con tu vocabulario</Badge>}
       </div>
 
       {/* Descripción / notas */}
