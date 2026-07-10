@@ -11,6 +11,7 @@ import {
 } from "@/lib/storage";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 import { resolveGroqModel } from "@/lib/transcribe/model";
+import { dedupeSatisfiesRequest } from "@/lib/transcribe/dedupe";
 import { resolveTranscribeMode, resolveTranslationLanguage, translationLanguageLabel } from "@/lib/translate/languages";
 import { translateText } from "@/lib/translate/groq";
 import { listVocabularyTerms } from "@/lib/vocabulary/store";
@@ -71,12 +72,34 @@ export async function POST(req: NextRequest) {
   // 1.4) Límite diario de transcripciones por usuario.
   //      Se cuentan también las transcripciones soft-deleted: el usuario ya consumió cuota
   //      real de Groq al crearlas, sin importar si luego las movió a la papelera.
+  //
+  //      Fail-CLOSED (corrección del review adversarial 2026-07-10, hallazgo MEDIUM #4): antes se
+  //      destructuraba solo `{ count }` sin mirar `error` — si la query fallaba (timeout, RLS,
+  //      conexión), `count` quedaba `null`, `isOverDailyLimit(0, DAILY_LIMIT)` daba `false` y el
+  //      request PASABA igual, como si el usuario no hubiera consumido nada de cuota ese día. Ante
+  //      un error real de la query no sabemos cuánto lleva consumido el usuario, así que no se puede
+  //      asumir "0" — se corta con 503 en vez de dejar pasar sin verificar (mismo criterio de "ante
+  //      la duda, no arriesgar" que ya usa el fetch de `/api/summarize`).
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { count: dailyCount } = await supabase
+  const { count: dailyCount, error: dailyCountErr } = await supabase
     .from("transcriptions")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id)
     .gte("created_at", oneDayAgo);
+
+  if (dailyCountErr) {
+    console.error("[transcribe] daily limit count failed", {
+      userId: user.id,
+      error: dailyCountErr.message,
+    });
+    Sentry.captureException(new Error(dailyCountErr.message || "Error al verificar el límite diario."), {
+      extra: { userId: user.id, stage: "daily-limit-count" },
+    });
+    return NextResponse.json(
+      { error: "No pudimos verificar tu límite diario. Probá de nuevo." },
+      { status: 503 }
+    );
+  }
 
   if (isOverDailyLimit(dailyCount ?? 0, DAILY_LIMIT)) {
     return NextResponse.json(
@@ -130,9 +153,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (existing) {
-    // La copia existente satisface el pedido si NO se pidió traducir, o si ya está traducida al
-    // mismo idioma destino — solo en ese caso devolvemos el duplicado sin re-procesar.
-    const alreadySatisfiesRequest = mode !== "translate" || existing.translated_to === targetLanguage;
+    // La copia existente satisface el pedido si NO se pidió traducir Y la fila no es en sí misma
+    // una traducción, o si se pidió traducir y ya está traducida al mismo idioma destino — mode-
+    // aware en ambas direcciones (ver `dedupeSatisfiesRequest`, bugfix del review adversarial
+    // 2026-07-10, hallazgo MEDIUM #1: antes un request "transcribir" sobre una fila YA traducida
+    // devolvía el texto traducido como si fuera la transcripción original, sin avisar).
+    const alreadySatisfiesRequest = dedupeSatisfiesRequest(mode, existing.translated_to, targetLanguage);
     if (alreadySatisfiesRequest) {
       return NextResponse.json({ text: existing.text ?? "", duplicate: true, id: existing.id });
     }

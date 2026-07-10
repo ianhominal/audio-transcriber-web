@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { AUDIO_BUCKET } from "@/lib/storage";
-import { cutoffDateIso } from "@/lib/purge";
+import { cutoffDateIso, audioPathsToRemove, selectPurgeableTranscriptionIds } from "@/lib/purge";
 
 export const runtime = "nodejs";
 
@@ -62,24 +62,47 @@ export async function GET(req: NextRequest) {
     .select("id, audio_url")
     .lt("deleted_at", cutoff);
 
+  const expired = expiredTranscriptions ?? [];
+  const audioPaths = audioPathsToRemove(expired);
+
+  // Bugfix LOW #10 (review adversarial 2026-07-10) + su corrección en el re-juicio: antes se borraban
+  // en duro TODAS las filas vencidas sin importar si el borrado del audio en Storage había fallado —
+  // un error de Storage (bucket caído, permisos, timeout) dejaba el audio HUÉRFANO para siempre,
+  // porque la fila que lo referenciaba ya no existía para reintentar. La decisión de qué filas son
+  // purgables (a nivel de LOTE, ver `selectPurgeableTranscriptionIds`) se testea aislada en
+  // `src/lib/purge.ts`. `audioRemovalSucceeded` arranca en `true` (vacuamente: si no hay audios que
+  // borrar, no hay nada que pueda fallar) y solo pasa a `false` ante un error de lote real de
+  // Storage.
   let deletedAudioFiles = 0;
-  const audioPaths = (expiredTranscriptions ?? [])
-    .map((t) => t.audio_url)
-    .filter((path): path is string => Boolean(path));
+  let audioRemovalSucceeded = true;
 
   if (audioPaths.length > 0) {
-    const { error: storageErr } = await supabase.storage.from(AUDIO_BUCKET).remove(audioPaths);
-    if (!storageErr) {
-      deletedAudioFiles = audioPaths.length;
-    } else {
+    const { data: removedFiles, error: storageErr } = await supabase.storage.from(AUDIO_BUCKET).remove(audioPaths);
+    if (storageErr) {
       console.error("[cron/purge] error borrando audios en Storage:", storageErr.message);
+      audioRemovalSucceeded = false; // ninguna fila con audio se da de baja: se reintenta la próxima.
+    } else {
+      // `data` lista solo lo que Storage removió efectivamente (un objeto ya inexistente no aparece,
+      // sin error) — sirve para REPORTAR cuántos se borraron, no para decidir qué filas purgar (eso
+      // es a nivel de lote, ver `selectPurgeableTranscriptionIds`).
+      deletedAudioFiles = removedFiles?.length ?? 0;
     }
   }
 
-  const { count: deletedTranscriptions } = await supabase
-    .from("transcriptions")
-    .delete({ count: "exact" })
-    .lt("deleted_at", cutoff);
+  const purgeableIds = selectPurgeableTranscriptionIds(expired, audioRemovalSucceeded);
+
+  let deletedTranscriptions = 0;
+  if (purgeableIds.length > 0) {
+    // `.lt("deleted_at", cutoff)` además de `.in("id", ...)` por defensa en profundidad (mismo
+    // criterio documentado más arriba: con `createServiceRoleClient` no hay RLS que acote el blast
+    // radius) — aunque `purgeableIds` ya viene filtrado por `cutoff` desde el `select` de arriba.
+    const { count } = await supabase
+      .from("transcriptions")
+      .delete({ count: "exact" })
+      .in("id", purgeableIds)
+      .lt("deleted_at", cutoff);
+    deletedTranscriptions = count ?? 0;
+  }
 
   // ---- Proyectos vencidos ----
   const { count: deletedProjects } = await supabase
@@ -89,7 +112,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     deletedProjects: deletedProjects ?? 0,
-    deletedTranscriptions: deletedTranscriptions ?? 0,
+    deletedTranscriptions,
     deletedAudioFiles,
   });
 }

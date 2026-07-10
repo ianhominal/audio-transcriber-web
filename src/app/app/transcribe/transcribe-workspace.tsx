@@ -364,6 +364,14 @@ export function TranscribeWorkspace({
         return;
       }
       projectId = res.id;
+      // Bugfix (review adversarial 2026-07-10, hallazgo MEDIUM #2): `destino` seguía en "__new__"
+      // después de crear el proyecto, así que la PRÓXIMA tanda (o un segundo click) volvía a pasar
+      // por esta rama y llamaba a `createProject` de nuevo con el mismo nombre → proyecto duplicado.
+      // Apenas se resuelve el id real, lo reflejamos en el <select> — tras el `router.refresh()` de
+      // más abajo el proyecto nuevo ya aparece en `projects` y el <select> lo resuelve normal.
+      setDestino(res.id);
+      setNewName("");
+      setNewIcon("📁");
     } else if (destino) {
       projectId = destino;
     }
@@ -704,93 +712,96 @@ export function TranscribeWorkspace({
           abierto en otra pestaña).
         </p>
       )}
-      {recordError && <p className="mt-2 text-sm text-red-600">{recordError}</p>}
-      {captureError && <p className="mt-2 text-sm text-red-600">{captureError}</p>}
+      {recordError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{recordError}</p>}
+      {captureError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{captureError}</p>}
 
-      {/* Cola de audios */}
-      {items.length > 0 && (
-        <ul className="mt-4 space-y-2" aria-live="polite">
-          {items.map((it) => (
-            <li
-              key={it.key}
-              className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3"
-            >
-              <StatusDot status={it.status} />
-              <div className="min-w-0 flex-1">
-                {/* Título editable inline mientras el ítem está pendiente: un click lo convierte
-                    en <input> (sin modal — ver comentario en `enqueueRecording`). Enter/blur
-                    confirma, Escape cancela. Aplica igual a grabaciones y archivos subidos. */}
-                {editingKey === it.key ? (
-                  <input
-                    autoFocus
-                    value={editDraft}
-                    onChange={(e) => setEditDraft(e.target.value)}
-                    onBlur={() => commitEditTitle(it)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        commitEditTitle(it);
-                      } else if (e.key === "Escape") {
-                        e.preventDefault();
-                        cancelEditTitle();
-                      }
-                    }}
-                    aria-label={`Editar título de ${it.title}`}
-                    className="w-full min-w-0 rounded-md border border-accent px-2 py-1 text-sm font-medium text-foreground focus:outline-none"
-                  />
-                ) : it.status === "pending" && !running ? (
-                  <button
-                    type="button"
-                    onClick={() => startEditTitle(it)}
-                    className="group flex max-w-full items-center gap-1.5 text-left"
-                    aria-label={`Editar título de ${it.title}`}
-                  >
-                    <span className="truncate text-sm font-medium text-foreground transition-colors duration-150 ease-out group-hover:text-accent">
-                      {it.title}
-                    </span>
-                    <span
-                      className="shrink-0 text-xs text-tertiary transition-colors duration-150 ease-out group-hover:text-accent"
-                      aria-hidden="true"
-                    >
-                      ✏️
-                    </span>
-                  </button>
-                ) : (
-                  <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
-                )}
-                <p className="text-xs text-tertiary">
-                  {formatFileSize(it.file.size)}
-                  {it.status === "duplicate" && " · ya estaba guardado"}
-                  {it.status === "error" && ` · ${it.error}`}
-                </p>
-              </div>
-              {(it.status === "done" || it.status === "duplicate") && it.resultId && (
-                <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-accent hover:underline">
-                  Ver
-                </Link>
-              )}
-              {it.status === "pending" && !running && editingKey !== it.key && (
+      {/* Cola de audios. El <ul> se renderiza SIEMPRE (bugfix LOW #12, review adversarial
+          2026-07-10): antes vivía detrás de `{items.length > 0 && (...)}`, así que la región
+          `aria-live` recién se montaba con el PRIMER ítem ya adentro — un lector de pantalla nunca
+          llega a anunciar esa primera inserción porque la región todavía no existía cuando ocurrió.
+          Pre-existiendo vacía, la primera inserción sí dispara el anuncio. El espaciado (`mt-4`)
+          queda condicional para no dejar un margen huérfano cuando la cola está vacía. */}
+      <ul className={`space-y-2 ${items.length > 0 ? "mt-4" : ""}`} aria-live="polite">
+        {items.map((it) => (
+          <li
+            key={it.key}
+            className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3"
+          >
+            <StatusDot status={it.status} />
+            <div className="min-w-0 flex-1">
+              {/* Título editable inline mientras el ítem está pendiente: un click lo convierte
+                  en <input> (sin modal — ver comentario en `enqueueRecording`). Enter/blur
+                  confirma, Escape cancela. Aplica igual a grabaciones y archivos subidos. */}
+              {editingKey === it.key ? (
+                <input
+                  autoFocus
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onBlur={() => commitEditTitle(it)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitEditTitle(it);
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelEditTitle();
+                    }
+                  }}
+                  aria-label={`Editar título de ${it.title}`}
+                  className="w-full min-w-0 rounded-md border border-accent px-2 py-1 text-sm font-medium text-foreground focus:outline-none"
+                />
+              ) : it.status === "pending" && !running ? (
                 <button
                   type="button"
-                  onClick={() => removeItem(it.key)}
-                  className="tap-target flex shrink-0 items-center justify-center rounded text-tertiary transition hover:text-red-500"
-                  aria-label={`Quitar ${it.title} de la cola`}
+                  onClick={() => startEditTitle(it)}
+                  className="group flex max-w-full items-center gap-1.5 text-left"
+                  aria-label={`Editar título de ${it.title}`}
                 >
-                  ✕
+                  <span className="truncate text-sm font-medium text-foreground transition-colors duration-150 ease-out group-hover:text-accent">
+                    {it.title}
+                  </span>
+                  <span
+                    className="shrink-0 text-xs text-tertiary transition-colors duration-150 ease-out group-hover:text-accent"
+                    aria-hidden="true"
+                  >
+                    ✏️
+                  </span>
                 </button>
+              ) : (
+                <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
               )}
-            </li>
-          ))}
-        </ul>
-      )}
+              <p className="text-xs text-tertiary">
+                {formatFileSize(it.file.size)}
+                {it.status === "duplicate" && " · ya estaba guardado"}
+                {it.status === "error" && ` · ${it.error}`}
+              </p>
+            </div>
+            {(it.status === "done" || it.status === "duplicate") && it.resultId && (
+              <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-accent hover:underline">
+                Ver
+              </Link>
+            )}
+            {it.status === "pending" && !running && editingKey !== it.key && (
+              <button
+                type="button"
+                onClick={() => removeItem(it.key)}
+                className="tap-target flex shrink-0 items-center justify-center rounded text-tertiary transition hover:text-red-500"
+                aria-label={`Quitar ${it.title} de la cola`}
+              >
+                ✕
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
 
       {/* Derivación a la app de escritorio para archivos grandes (límite de Vercel) */}
       {hasOversize && (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
           <span aria-hidden="true">⚠️</span>
           <p>
             Algunos audios pesan más de 4,5 MB y la web no los soporta.{" "}
-            <Link href="/descargar" className="font-semibold underline hover:text-amber-900">
+            <Link href="/descargar" className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100">
               Descargá la app de escritorio
             </Link>{" "}
             para sincronizar archivos grandes sin límite.
@@ -799,7 +810,10 @@ export function TranscribeWorkspace({
       )}
 
       {topError && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          role="alert"
+          className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-400/15 dark:text-red-200"
+        >
           {topError}
         </p>
       )}

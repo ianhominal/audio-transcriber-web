@@ -11,9 +11,14 @@ type ToastContextValue = {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+// Bugfix LOW #8 (review adversarial 2026-07-10): paleta hardcodeada a light — en dark el toast se
+// veía como una caja blanca/clara flotando sobre el resto de la UI oscura. `info` ya era
+// theme-aware (usa los tokens `border`/`surface`/`foreground` de `globals.css`); success/error
+// ahora suman variantes `dark:` con fondo tenue (`/15`) y texto claro, mismo criterio de contraste
+// que el resto de "cajas" de estado tocadas en este mismo fix.
 const TONE_CLASSES: Record<ToastTone, string> = {
-  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  error: "border-red-200 bg-red-50 text-red-800",
+  success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-400/15 dark:text-emerald-200",
+  error: "border-red-200 bg-red-50 text-red-800 dark:border-red-400/30 dark:bg-red-400/15 dark:text-red-200",
   info: "border-border bg-surface text-foreground",
 };
 

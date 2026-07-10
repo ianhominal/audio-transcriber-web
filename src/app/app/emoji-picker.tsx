@@ -37,16 +37,46 @@ export function EmojiPicker({
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       setOpen(false);
     }
+    // Escape en fase de CAPTURA (no bubble): si este picker se abre DENTRO de un `Modal`
+    // (`components/ui/Modal.tsx`), su propio listener de Escape vive en `document` en fase bubble.
+    // Sin `stopPropagation`/`stopImmediatePropagation` acá, un solo Escape disparaba AMBOS
+    // handlers — cerraba el picker Y el Modal padre (que corre `reset()` y borra lo tipeado).
+    // Capturando antes y cortando la propagación, el picker "consume" el Escape primero — bugfix
+    // MEDIUM #6 del review adversarial 2026-07-10.
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setOpen(false);
+      }
     }
     document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
     // Los refs son estables entre renders — no hace falta re-suscribir salvo que cambie `open`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Foco al abrir/cerrar (bugfix LOW #11, review adversarial 2026-07-10): el panel es `role="menu"`
+  // pero no movía el foco, así que quien navega solo con teclado no podía llegar a los ítems (el
+  // popover se abre pero el foco se queda en el trigger). Al abrir, el foco entra al ícono
+  // actualmente elegido (`aria-checked`) o, si ninguno lo está, al primero de la grilla; al cerrar
+  // (o desmontar), vuelve al botón que abrió el picker — mismo criterio de "restaurar foco al
+  // trigger" que ya usa `Modal` (`components/ui/Modal.tsx`). Alcance acotado a propósito (sin
+  // tab-trap dentro del panel): el picker ya se cierra solo con click-afuera/Escape/elegir un ítem.
+  useEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    const target =
+      panel?.querySelector<HTMLElement>('[aria-checked="true"]') ?? panel?.querySelector<HTMLElement>("button");
+    target?.focus();
+    return () => {
+      trigger?.focus();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

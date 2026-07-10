@@ -32,17 +32,42 @@ export function ProjectColorPicker({
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       setOpen(false);
     }
+    // Escape en fase de CAPTURA (no bubble) — mismo fix que `EmojiPicker` (bugfix MEDIUM #6, review
+    // adversarial 2026-07-10): sin esto, abrir este picker DENTRO de un `Modal` y apretar Escape
+    // cerraba el picker Y el Modal padre a la vez (que corre `reset()` y borra lo tipeado). Cortar
+    // la propagación acá hace que este picker "consuma" el Escape antes de que llegue al listener
+    // bubble del Modal.
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setOpen(false);
+      }
     }
     document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
     // Los refs son estables entre renders — no hace falta re-suscribir salvo que cambie `open`
     // (mismo criterio que EmojiPicker).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Foco al abrir/cerrar (bugfix LOW #11, review adversarial 2026-07-10) — mismo criterio que
+  // `EmojiPicker`: al abrir, el foco entra al swatch actualmente elegido (`aria-checked`) o, si
+  // ninguno lo está, al primero del grid; al cerrar vuelve al botón trigger.
+  useEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    const target =
+      panel?.querySelector<HTMLElement>('[aria-checked="true"]') ?? panel?.querySelector<HTMLElement>("button");
+    target?.focus();
+    return () => {
+      trigger?.focus();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

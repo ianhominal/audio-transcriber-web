@@ -18,6 +18,16 @@ const SUMMARY_MODEL = "llama-3.1-8b-instant";
  */
 export const MAX_SUMMARY_INPUT_CHARS = 40_000;
 
+// Techo de tokens de salida — cota de costo/abuso (auditoría 2026-07-10, hallazgo MEDIUM #3: el
+// endpoint no tenía `max_tokens`, así que un desvío del modelo podía generar una respuesta
+// arbitrariamente larga y cara). A diferencia de la traducción/corrección (donde el output es ~del
+// largo del input, ver `src/lib/translate/groq.ts`/`src/lib/vocabulary/groq.ts`), un resumen es
+// SIEMPRE corto por diseño — no escala con `MAX_SUMMARY_INPUT_CHARS` — así que acá el tope es un
+// valor FIJO, no proporcional. 2048 tokens da margen de sobra para el peor caso legítimo (resumen +
+// hasta 12 keyPoints + 12 actionItems, ver los topes de `src/lib/summary/format.ts`) sin dejar que
+// el modelo se extienda indefinidamente.
+const MAX_SUMMARY_OUTPUT_TOKENS = 2_048;
+
 export type SummarizeResult = { ok: true; summary: SummaryResult } | { ok: false; error: string };
 
 /**
@@ -45,6 +55,7 @@ export function buildSummaryRequest(text: string, languageLabel: string | null) 
   return {
     model: SUMMARY_MODEL,
     temperature: 0.2,
+    max_tokens: MAX_SUMMARY_OUTPUT_TOKENS,
     response_format: { type: "json_object" as const },
     messages: [
       {

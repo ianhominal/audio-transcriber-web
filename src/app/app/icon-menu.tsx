@@ -39,18 +39,42 @@ export function IconMenu({
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       close();
     }
+    // Escape en fase de CAPTURA (no bubble) — mismo fix que `EmojiPicker`/`ProjectColorPicker`
+    // (bugfix MEDIUM #6, review adversarial 2026-07-10): `TranscriptionRow` abre este menú DENTRO
+    // de un `Modal` propio ("Proyecto nuevo…"), y sin esto un Escape cerraba el menú Y el Modal a
+    // la vez. Cortar la propagación acá hace que este menú "consuma" el Escape antes de que llegue
+    // al listener bubble del Modal.
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        close();
+      }
     }
 
     document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
     // Los refs (triggerRef/panelRef) son estables entre renders; `close` solo llama a `setOpen`
     // (también estable) — no hace falta re-suscribir salvo que cambie `open`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Foco al abrir/cerrar (bugfix LOW #11, review adversarial 2026-07-10) — mismo criterio que
+  // `EmojiPicker`/`ProjectColorPicker`: al abrir, el foco entra al primer `MenuItem`; al cerrar
+  // vuelve al botón "⋯" que abrió el menú.
+  useEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    const target = panel?.querySelector<HTMLElement>('[role="menuitem"]');
+    target?.focus();
+    return () => {
+      trigger?.focus();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

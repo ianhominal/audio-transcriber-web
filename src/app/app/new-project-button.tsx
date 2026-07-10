@@ -73,7 +73,7 @@ export function NewProjectButton() {
         aria-label="Contexto o descripción del proyecto"
         className="w-full resize-y rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent focus:outline-none"
       />
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
         <Button type="submit" size="sm" loading={pending} className="flex-1">
           {pending ? "Creando…" : "Crear"}

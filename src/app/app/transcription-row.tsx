@@ -204,7 +204,7 @@ export function TranscriptionRow({
             }}
             className="mt-4 w-full rounded-md border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent"
           />
-          {newProjectError && <p className="mt-2 text-xs text-red-600">{newProjectError}</p>}
+          {newProjectError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{newProjectError}</p>}
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={closeNewProjectModal}>
               Cancelar

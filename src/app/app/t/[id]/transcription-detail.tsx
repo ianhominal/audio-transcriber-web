@@ -130,6 +130,21 @@ export function TranscriptionDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportOpen]);
 
+  // Foco al abrir/cerrar (bugfix LOW #11, review adversarial 2026-07-10) — mismo criterio que
+  // `IconMenu`: al abrir, el foco entra al primer ítem del menú; al cerrar vuelve al botón
+  // "Exportar" que lo abrió.
+  useEffect(() => {
+    if (!exportOpen) return;
+    const trigger = exportTriggerRef.current;
+    const panel = exportPanelRef.current;
+    const target = panel?.querySelector<HTMLElement>('[role="menuitem"]');
+    target?.focus();
+    return () => {
+      trigger?.focus();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportOpen]);
+
   const projectName = projects.find((p) => p.id === projectId)?.name ?? null;
 
   // Hay cambio real si cambió el título, el texto, la descripción o el ícono respecto del baseline.
@@ -191,8 +206,18 @@ export function TranscriptionDetail({
 
   async function changeProject(value: string) {
     const next = value === "" ? null : value;
+    // Bugfix LOW #9 (review adversarial 2026-07-10): antes se seteaba `projectId` optimista y se
+    // ignoraba el `ActionResult` de `assignTranscriptionToProject` (que devuelve `{ ok: false }` en
+    // vez de lanzar) — si el server rechazaba el move, el <select> quedaba mostrando un proyecto al
+    // que la transcripción en realidad NUNCA se movió, sin ningún aviso. Se captura el valor previo
+    // para poder revertir, mismo patrón que `remove()`/`save()` en este mismo archivo.
+    const previous = projectId;
     setProjectId(next);
-    await assignTranscriptionToProject(transcription.id, next);
+    const res = await assignTranscriptionToProject(transcription.id, next);
+    if (!res.ok) {
+      setProjectId(previous);
+      toast(res.error ?? "No se pudo mover la transcripción.", "error");
+    }
   }
 
   async function copy() {
@@ -421,7 +446,7 @@ export function TranscriptionDetail({
           {summary && (
             <div className="mt-3 space-y-3">
               {summaryOutOfDate && (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
                   ⚠️ El texto cambió desde que se generó este resumen — puede estar desactualizado.
                 </p>
               )}

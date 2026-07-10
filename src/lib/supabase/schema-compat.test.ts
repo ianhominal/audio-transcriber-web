@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   isMissingColumnError,
+  isMissingTableError,
   buildProjectRow,
   shouldRedetectSchemaCompat,
   markSchemaCompatResult,
@@ -48,6 +49,42 @@ describe("isMissingColumnError", () => {
     expect(isMissingColumnError(42)).toBe(false);
     expect(isMissingColumnError({})).toBe(false);
     expect(isMissingColumnError({ code: 42703 })).toBe(false); // code no-string: no matchea
+  });
+});
+
+describe("isMissingTableError", () => {
+  it("detecta código 42P01 (relación/tabla inexistente)", () => {
+    expect(isMissingTableError({ code: "42P01", message: 'relation "ai_usage_log" does not exist' })).toBe(true);
+  });
+
+  it("no matchea otro código 42xxx (ej. columna inexistente 42703)", () => {
+    expect(isMissingTableError({ code: "42703", message: "column projects.color does not exist" })).toBe(false);
+  });
+
+  it("cae a matchear por mensaje cuando no viene el código", () => {
+    expect(isMissingTableError({ message: 'relation "public.ai_usage_log" does not exist' })).toBe(true);
+  });
+
+  it("no matchea un mensaje de 'does not exist' que no hable de una relación", () => {
+    expect(isMissingTableError({ message: "column projects.color does not exist" })).toBe(false);
+    expect(isMissingTableError({ message: "function foo() does not exist" })).toBe(false);
+  });
+
+  it("NO se confunde con un mensaje de columna faltante que igual menciona 'relation' (regresión re-juicio)", () => {
+    // El mensaje real de 42703 de Postgres contiene "relation" y "does not exist" — no debe
+    // clasificarse como tabla faltante (el fallback por mensaje excluye los que mencionan "column").
+    const columnMsg = 'column "summary" of relation "transcriptions" does not exist';
+    expect(isMissingTableError({ message: columnMsg })).toBe(false);
+    // Simetría: ese mismo mensaje SÍ es columna faltante.
+    expect(isMissingColumnError({ message: columnMsg })).toBe(true);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isMissingTableError(null)).toBe(false);
+    expect(isMissingTableError(undefined)).toBe(false);
+    expect(isMissingTableError("relation does not exist")).toBe(false);
+    expect(isMissingTableError({})).toBe(false);
+    expect(isMissingTableError({ code: 42701 })).toBe(false); // code no-string: no matchea
   });
 });
 

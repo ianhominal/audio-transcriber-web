@@ -103,6 +103,37 @@ export function isMissingColumnError(error: unknown): boolean {
 }
 
 /**
+ * true si el error de Supabase/PostgREST corresponde a una TABLA inexistente ("relation ... does
+ * not exist", `42P01`) — a diferencia de `isMissingColumnError` (`42703`, columna faltante en una
+ * tabla que SÍ existe). Hace falta un detector aparte porque una tabla NUEVA (no una columna
+ * agregada a una tabla existente) falla con un código distinto antes de que su migración se
+ * aplique — mismo caso que documenta `vocabulary_terms`
+ * (`supabase/migrations/20260710120000_user_vocabulary.sql`) y, ahora, `ai_usage_log`
+ * (`supabase/migrations/20260710130000_ai_usage_log.sql`, ver `src/lib/aiUsage.ts`). Estricto a
+ * propósito, mismo criterio que `isMissingColumnError`: NO matchea por código genérico `42xxx` ni
+ * por mensajes que no mencionen explícitamente una relación inexistente.
+ *
+ * OJO con el fallback por mensaje (corrección del re-juicio del review adversarial 2026-07-10): el
+ * mensaje real de columna faltante de Postgres es `column "x" of relation "y" does not exist`, que
+ * TAMBIÉN contiene "relation" y "does not exist" — así que hay que EXCLUIR explícitamente los que
+ * mencionen "column", si no un 42703 sin código (algún wrapper que lo pierda) se confundiría con un
+ * 42P01. El camino por `code` es el confiable; este fallback es solo un backstop.
+ */
+export function isMissingTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { code?: unknown; message?: unknown };
+
+  if (typeof e.code === "string" && e.code === "42P01") return true;
+
+  if (typeof e.message === "string") {
+    const msg = e.message.toLowerCase();
+    if (msg.includes("relation") && msg.includes("does not exist") && !msg.includes("column")) return true;
+  }
+
+  return false;
+}
+
+/**
  * Arma la fila a insertar/actualizar en `projects` agregando (o no) las columnas de
  * Drive-sync v2, según si están disponibles en el esquema real. Puro: no llama a Supabase.
  *

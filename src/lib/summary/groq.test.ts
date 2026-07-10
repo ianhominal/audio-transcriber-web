@@ -36,6 +36,15 @@ describe("buildSummaryRequest", () => {
     expect(system).toMatch(/mismo idioma/i);
     expect(system).not.toMatch(/tiene que estar en Español/i);
   });
+
+  it("acota max_tokens de salida a un techo fijo (el resumen siempre es corto, no proporcional al input)", () => {
+    const req = buildSummaryRequest("hola mundo", "Español");
+    expect(req.max_tokens).toBe(2048);
+    // Un input mucho más largo no cambia el tope de salida — a diferencia de traducción/corrección,
+    // acá el output NO escala con el input.
+    const longReq = buildSummaryRequest("a".repeat(30000), "Español");
+    expect(longReq.max_tokens).toBe(req.max_tokens);
+  });
 });
 
 describe("summarizeText", () => {

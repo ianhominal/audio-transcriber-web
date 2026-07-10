@@ -62,8 +62,8 @@ export default async function AjustesPage({
           role="status"
           className={`mt-5 flex items-start gap-2 rounded-xl border px-4 py-3 text-sm ${
             message.tone === "ok"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-red-200 bg-red-50 text-red-700"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/15 dark:text-emerald-200"
+              : "border-red-200 bg-red-50 text-red-700 dark:border-red-400/30 dark:bg-red-400/15 dark:text-red-200"
           }`}
         >
           <span aria-hidden="true">{message.tone === "ok" ? "✓" : "✕"}</span>
@@ -117,13 +117,13 @@ export default async function AjustesPage({
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {isConnected && !isRevoked ? (
-            <p className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+            <p className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200">
               <span aria-hidden="true">✓</span> Google Drive conectado
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               {isRevoked && (
-                <p className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                <p className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
                   <span aria-hidden="true">⚠️</span> Se venció el permiso de Google Drive
                 </p>
               )}

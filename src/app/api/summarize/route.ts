@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getApiUser } from "@/lib/supabase/api";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { isMissingColumnError, isMissingTableError } from "@/lib/supabase/schema-compat";
 import { translationLanguageLabel } from "@/lib/translate/languages";
 import { summarizeText } from "@/lib/summary/groq";
 import { parseStoredSummary, serializeSummary } from "@/lib/summary/format";
 import { canSummarizeText } from "@/lib/summary/validate";
 import { hashSummarySource } from "@/lib/summary/hash";
+import { isAiSummaryDailyLimitError, isAiSummaryForceLimitError } from "@/lib/aiUsage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -142,6 +143,61 @@ export async function POST(req: NextRequest) {
     }
     // `summary` guardado con forma inesperada (fila vieja/corrupta): no aborta, sigue abajo como
     // si no hubiera cache y regenera.
+  }
+
+  // 2.5) Cap de operaciones IA por usuario/24h (corrección del review adversarial 2026-07-10,
+  //      hallazgos MEDIUM #3 + CRÍTICO/WARNINGs del re-juicio): a partir de acá el request SÍ va a
+  //      llamar a Groq de verdad (no se resolvió con el cache de arriba) — sin este freno,
+  //      `force: true` permitía loopear "Regenerar" sobre la misma transcripción sin límite y quemar
+  //      la GROQ_API_KEY compartida. El cache sigue siendo el freno PRIMARIO (la mayoría de los
+  //      pedidos ni llegan acá); esto es la red de seguridad para cuando no aplica.
+  //
+  //      Estrategia RESERVE-ON-ATTEMPT + enforcement ATÓMICO en la DB: se intenta el INSERT en
+  //      `ai_usage_log` ANTES de llamar a Groq, y un trigger BEFORE INSERT cuenta y rechaza dentro de
+  //      la misma transacción (ver migración `20260710130000_ai_usage_log.sql` y `src/lib/aiUsage.ts`),
+  //      mismo patrón atómico que `vocabulary_terms`. Se prefirió esto a un count-then-insert (tiene
+  //      una carrera TOCTOU) y a "cobrar sólo si Groq responde OK" (sin un pre-check, ese esquema NO
+  //      previene el costo: Groq se llamaría igual en cada intento y solo fallaría el registro
+  //      posterior). El TRADEOFF explícito y aceptado: un intento que después falle en Groq igual
+  //      consume 1 de cuota — es deseable para un cap de costo (un usuario martillando un Groq caído
+  //      igual queda acotado) y el límite se resetea en 24h.
+  //
+  //      Ramas del resultado del INSERT:
+  //        - error de límite (token del trigger) → 429, sin llamar a Groq.
+  //        - tabla todavía sin migrar (42P01, `isMissingTableError`): `ai_usage_log` es NUEVA y, como
+  //          `vocabulary_terms`, se aplica automático recién al pushear a `main` — hay una ventana en
+  //          que el código está desplegado pero la tabla no existe. Ahí se DEGRADA (se sigue sin cap)
+  //          en vez de romper el resumen entero, mismo criterio que `listVocabularyTerms`.
+  //        - cualquier OTRO error (conexión, RLS, timeout): fail-CLOSED con 503 — no pudimos reservar
+  //          la cuota, así que no arriesgamos una llamada sin verificar (mismo criterio que el fix del
+  //          límite diario de `/api/transcribe`).
+  const { error: usageLogErr } = await supabase
+    .from("ai_usage_log")
+    .insert({ user_id: user.id, kind: "summary", forced: force });
+
+  if (usageLogErr) {
+    if (isAiSummaryForceLimitError(usageLogErr)) {
+      return NextResponse.json(
+        { error: "Llegaste al límite diario de regeneraciones de resumen. Probá mañana." },
+        { status: 429 }
+      );
+    }
+    if (isAiSummaryDailyLimitError(usageLogErr)) {
+      return NextResponse.json(
+        { error: "Llegaste al límite diario de resúmenes con IA. Probá mañana." },
+        { status: 429 }
+      );
+    }
+    if (!isMissingTableError(usageLogErr)) {
+      console.error("[summarize] usage log insert failed", { userId: user.id, error: usageLogErr.message });
+      Sentry.captureException(usageLogErr, { extra: { userId: user.id, stage: "summary-usage-log-insert" } });
+      return NextResponse.json(
+        { error: "No pudimos verificar tu límite diario. Probá de nuevo." },
+        { status: 503 }
+      );
+    }
+    // 42P01: tabla sin migrar todavía — se degrada sin cap (no se reporta a Sentry, ruidoso durante
+    // la ventana de rollout).
   }
 
   // 3) Idioma del resumen: el del texto FINAL de la transcripción.

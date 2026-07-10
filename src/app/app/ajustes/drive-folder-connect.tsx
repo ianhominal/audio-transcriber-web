@@ -193,7 +193,7 @@ export function DriveFolderConnect() {
 
       {summary ? (
         <div className="mt-4 space-y-2 text-sm">
-          <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-medium text-emerald-700">
+          <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-medium text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200">
             <span aria-hidden="true">✓</span> Carpeta conectada
           </p>
           <ul className="space-y-1 text-secondary">
@@ -243,7 +243,7 @@ export function DriveFolderConnect() {
             ))}
           </nav>
 
-          {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+          {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
 
           <div className="mt-2 max-h-64 min-h-[6rem] overflow-y-auto rounded-lg border border-border">
             {loading ? (
@@ -306,7 +306,7 @@ export function DriveFolderConnect() {
                 ➕ Crear carpeta nueva acá
               </button>
             )}
-            {createFolderError && <p className="mt-1 text-xs text-red-600">{createFolderError}</p>}
+            {createFolderError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{createFolderError}</p>}
           </div>
 
           {canConnect ? (
