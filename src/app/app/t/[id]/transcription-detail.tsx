@@ -19,6 +19,8 @@ import { useViewportClamp } from "@/hooks/useViewportClamp";
 import { translationLanguageLabel } from "@/lib/translate/languages";
 import { qualityLabel } from "@/lib/transcribe/model";
 import { languageLabel } from "@/lib/settings/validate";
+import { canSummarizeText } from "@/lib/summary/validate";
+import type { SummaryResult } from "@/lib/summary/format";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
 
@@ -48,10 +50,18 @@ export function TranscriptionDetail({
   transcription,
   projects,
   audioSrc,
+  initialSummary,
+  summaryStale,
 }: {
   transcription: Transcription;
   projects: Project[];
   audioSrc: string | null;
+  // Fase F5 (resumen con IA): ya vienen resueltos desde el server component (`page.tsx`) — parseo
+  // de `summary` y comparación de hash contra `summary_source_hash` son server-only (ver
+  // `src/lib/summary/hash.ts`, que usa `crypto` de Node), así que este componente cliente nunca
+  // recibe el hash crudo, solo el resultado ya interpretado.
+  initialSummary: SummaryResult | null;
+  summaryStale: boolean;
 }) {
   const router = useRouter();
   const { show: toast } = useToast();
@@ -77,6 +87,15 @@ export function TranscriptionDetail({
   // Fase F4: solo aplica a transcripciones traducidas (`translated_to`+`original_text` ambos
   // presentes) — arranca oculto, el texto principal (`text`) ya es el traducido.
   const [showOriginal, setShowOriginal] = useState(false);
+  // Fase F5 (resumen con IA). `summaryText` es el `text` EXACTO al que corresponde `summary` — se
+  // usa para derivar "¿está desactualizado?" comparando contra el `text` actual (mismo criterio
+  // que `dirty` más abajo: derivado, no un booleano propio que se pueda desincronizar). Arranca en
+  // `null` (sentinela que nunca matchea) si `summaryStale` vino en `true` desde el server —así el
+  // resumen inicial recibido ya nace marcado como desactualizado sin tener que adivinar a qué
+  // texto viejo correspondía.
+  const [summary, setSummary] = useState(initialSummary);
+  const [summaryText, setSummaryText] = useState(summaryStale ? null : transcription.text);
+  const [summarizing, setSummarizing] = useState(false);
   // Menú "Exportar": portal a `document.body` + clampeo al viewport (mismo patrón que `IconMenu`,
   // extraído a `useViewportClamp`) — antes era `absolute left-0 w-64` sin clamp, así que en
   // pantallas angostas (~360-390px) se salía por el borde derecho.
@@ -115,6 +134,13 @@ export function TranscriptionDetail({
     description !== baseline.description ||
     icon !== baseline.icon;
 
+  // Fase F5: no tiene sentido resumir un texto casi vacío (ver `MIN_SUMMARY_TEXT_LENGTH`), y
+  // resumir mientras hay cambios de texto sin guardar generaría un resumen que no corresponde a lo
+  // que está persistido — se pide guardar primero, mismo criterio de "una sola fuente de verdad"
+  // que ya usa el backend (`/api/summarize` lee `text` de la DB, no lo que mande el cliente).
+  const summaryTooShort = !canSummarizeText(text);
+  const summaryOutOfDate = summary !== null && text !== summaryText;
+
   async function save() {
     if (!dirty) return;
     setSaving(true);
@@ -128,6 +154,33 @@ export function TranscriptionDetail({
       router.refresh(); // refresca la lista/título en el resto de la app
     } else {
       toast(res.error ?? "No se pudo guardar.", "error");
+    }
+  }
+
+  /**
+   * Genera (o regenera) el resumen con IA — Fase F5. `force: true` cuando ya hay un resumen
+   * visible: en ese caso no tiene sentido pedirle al server que devuelva el cache (ya lo estamos
+   * mostrando), el click significa "quiero uno nuevo".
+   */
+  async function summarize() {
+    setSummarizing(true);
+    try {
+      const res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: transcription.id, force: summary !== null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error ?? "No se pudo generar el resumen.", "error");
+        return;
+      }
+      setSummary({ summary: data.summary, keyPoints: data.keyPoints ?? [], actionItems: data.actionItems ?? [] });
+      setSummaryText(text);
+    } catch {
+      toast("No se pudo contactar al servidor.", "error");
+    } finally {
+      setSummarizing(false);
     }
   }
 
@@ -322,6 +375,75 @@ export function TranscriptionDetail({
           )}
         </div>
       )}
+
+      {/* Resumen con IA (Fase F5) */}
+      <div className="mt-5 rounded-xl border border-border-strong bg-surface p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">✨ Resumen con IA</h3>
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={summarizing}
+            disabled={summarizing || summaryTooShort || dirty}
+            title={
+              summaryTooShort
+                ? "El texto es muy corto para resumir."
+                : dirty
+                  ? "Guardá los cambios de texto antes de generar el resumen."
+                  : undefined
+            }
+            onClick={summarize}
+          >
+            {summarizing ? "Generando…" : summary ? "Regenerar" : "Resumir"}
+          </Button>
+        </div>
+
+        {/* Región viva: un lector de pantalla anuncia cuándo empieza a generar y cuándo aparece el
+            resumen, sin que el usuario tenga que ir a buscarlo. `aria-live="polite"` para no
+            interrumpir lo que esté leyendo. */}
+        <div role="status" aria-live="polite">
+          {summarizing && <p className="mt-2 text-xs text-tertiary">Generando el resumen…</p>}
+          {!summary && !summarizing && summaryTooShort && (
+            <p className="mt-2 text-xs text-tertiary">Este texto es muy corto para generar un resumen.</p>
+          )}
+          {!summary && !summarizing && !summaryTooShort && (
+            <p className="mt-2 text-xs text-tertiary">
+              Generá un resumen breve con puntos clave y tareas, sin releer todo el texto.
+            </p>
+          )}
+
+          {summary && (
+            <div className="mt-3 space-y-3">
+              {summaryOutOfDate && (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  ⚠️ El texto cambió desde que se generó este resumen — puede estar desactualizado.
+                </p>
+              )}
+              <p className="text-sm text-secondary">{summary.summary}</p>
+              {summary.keyPoints.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">Puntos clave</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-secondary">
+                    {summary.keyPoints.map((point, i) => (
+                      <li key={i}>{point}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {summary.actionItems.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">Tareas y próximos pasos</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-secondary">
+                    {summary.actionItems.map((item, i) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Texto editable */}
       <textarea
