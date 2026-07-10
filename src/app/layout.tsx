@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Audio Transcriber — audio a texto en segundos",
-  description: "Transcribí audios (español y más) a texto con Groq (Whisper). Rápido y simple.",
+  description: "Transcribí tus audios (español y más) a texto en segundos. Rápido y simple.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

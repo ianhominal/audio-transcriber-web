@@ -67,11 +67,7 @@ export function NewSubfolderButton({
         size="sm"
         onClick={() => setOpen(true)}
         disabled={!available}
-        title={
-          available
-            ? undefined
-            : "Las subcarpetas necesitan una actualización pendiente de la base de datos."
-        }
+        title={available ? undefined : "Las subcarpetas todavía no están disponibles para tu cuenta."}
       >
         📁 Nueva carpeta
       </Button>

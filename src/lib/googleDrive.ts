@@ -48,7 +48,7 @@ let gisScriptPromise: Promise<void> | null = null;
 /** Inyecta el script de Google Identity Services una sola vez y resuelve cuando está listo para usarse. */
 export function loadGoogleIdentityScript(): Promise<void> {
   if (typeof window === "undefined") {
-    return Promise.reject(new Error("Google Identity Services solo funciona en el navegador."));
+    return Promise.reject(new Error("Esto solo funciona desde el navegador."));
   }
   if (window.google?.accounts?.oauth2) return Promise.resolve();
   if (gisScriptPromise) return gisScriptPromise;
@@ -58,7 +58,7 @@ export function loadGoogleIdentityScript(): Promise<void> {
     if (existing) {
       existing.addEventListener("load", () => resolve());
       existing.addEventListener("error", () =>
-        reject(new Error("No se pudo cargar Google Identity Services."))
+        reject(new Error("No se pudo conectar con Google. Probá de nuevo."))
       );
       return;
     }
@@ -67,7 +67,7 @@ export function loadGoogleIdentityScript(): Promise<void> {
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("No se pudo cargar Google Identity Services."));
+    script.onerror = () => reject(new Error("No se pudo conectar con Google. Probá de nuevo."));
     document.head.appendChild(script);
   });
   return gisScriptPromise;
@@ -106,7 +106,7 @@ export async function requestGoogleDriveAccessToken(clientId: string | undefined
   await loadGoogleIdentityScript();
   const oauth2 = window.google?.accounts?.oauth2;
   if (!oauth2) {
-    throw new DriveAuthError("unknown", "Google Identity Services no está disponible.");
+    throw new DriveAuthError("unknown", "No se pudo conectar con Google. Probá de nuevo.");
   }
 
   return new Promise<string>((resolve, reject) => {

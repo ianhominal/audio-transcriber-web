@@ -113,18 +113,18 @@ export function TranscribeWorkspace({
   const setLanguageAsDefault = async () => {
     try {
       await languageField.setAsDefault();
-      toast("Idioma fijado como default.", "success");
+      toast("Idioma guardado como predeterminado.", "success");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "No se pudo fijar el default.", "error");
+      toast(err instanceof Error ? err.message : "No se pudo guardar la preferencia.", "error");
     }
   };
 
   const setQualityAsDefault = async () => {
     try {
       await qualityField.setAsDefault();
-      toast("Calidad fijada como default.", "success");
+      toast("Calidad guardada como predeterminada.", "success");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "No se pudo fijar el default.", "error");
+      toast(err instanceof Error ? err.message : "No se pudo guardar la preferencia.", "error");
     }
   };
 
@@ -514,9 +514,12 @@ export function TranscribeWorkspace({
               onChange={(e) => qualityField.change(e.target.value)}
               className="rounded-lg border border-border-strong px-3 py-2 focus:border-accent"
             >
-              <option value="whisper-large-v3-turbo">Rápida (turbo)</option>
-              <option value="whisper-large-v3">Máxima (large-v3)</option>
+              <option value="whisper-large-v3-turbo">Rápida</option>
+              <option value="whisper-large-v3">Máxima calidad</option>
             </select>
+            <span className="mt-1 max-w-[12rem] text-[11px] text-tertiary">
+              Rápida es ideal para audios largos; Máxima calidad prioriza la precisión.
+            </span>
             <DefaultAffordance
               isDefault={qualityField.isDefault}
               saving={qualityField.saving}
@@ -528,7 +531,7 @@ export function TranscribeWorkspace({
 
         {/* Modo: transcribir tal cual vs. transcribir + traducir el texto con un LLM (Fase F4).
             Separado con un borde superior propio para no mezclarse visualmente con Idioma/Calidad
-            de arriba — esos son selectores con affordance de default de F1 (pill "Default" /
+            de arriba — esos son selectores con affordance de default de F1 (pill "Predeterminado" /
             "Modificado · restaurar"); esto es una elección puntual por tanda, sin esa affordance
             todavía (ver ROADMAP.md item 6/F4, "Pendiente" de integrar con los defaults). */}
         <div className="mt-4 border-t border-border pt-4">
@@ -789,10 +792,12 @@ export function TranscribeWorkspace({
 }
 
 /**
- * Affordance estilo VS Code Settings: pill "Default" cuando el selector coincide con el default
- * guardado, o "Modificado · restaurar" + "Fijar como default" cuando se cambió solo para esta
- * tanda (override puntual, ver `TranscribeWorkspace`) — el estado default-vs-cambiado queda
- * siempre visible, sin que el usuario tenga que adivinarlo.
+ * Affordance estilo VS Code Settings: pill "Predeterminado" cuando el selector coincide con el
+ * default guardado, o "Modificado · restaurar" + "Guardar como predeterminado" cuando se cambió
+ * solo para esta tanda (override puntual, ver `TranscribeWorkspace`) — el estado
+ * default-vs-cambiado queda siempre visible, sin que el usuario tenga que adivinarlo. Texto
+ * invariable en género (concuerda con "valor", no con "Idioma"/"Calidad"): el componente es
+ * compartido por ambos selectores, así que no puede hardcodear un género específico.
  */
 function DefaultAffordance({
   isDefault,
@@ -808,7 +813,7 @@ function DefaultAffordance({
   if (isDefault) {
     return (
       <span className="mt-1 inline-flex w-fit items-center rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] font-medium text-tertiary">
-        Default
+        Predeterminado
       </span>
     );
   }
@@ -826,7 +831,7 @@ function DefaultAffordance({
         disabled={saving}
         className="font-medium text-accent hover:underline disabled:opacity-50"
       >
-        {saving ? "Guardando…" : "Fijar como default"}
+        {saving ? "Guardando…" : "Guardar como predeterminado"}
       </button>
     </span>
   );

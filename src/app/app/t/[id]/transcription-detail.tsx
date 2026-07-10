@@ -17,6 +17,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { useViewportClamp } from "@/hooks/useViewportClamp";
 import { translationLanguageLabel } from "@/lib/translate/languages";
+import { qualityLabel } from "@/lib/transcribe/model";
+import { languageLabel } from "@/lib/settings/validate";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
 
@@ -248,8 +250,8 @@ export function TranscriptionDetail({
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-tertiary">
-        {transcription.model && <Badge>{transcription.model}</Badge>}
-        <Badge>{transcription.language}</Badge>
+        {transcription.model && <Badge>{qualityLabel(transcription.model)}</Badge>}
+        <Badge>{languageLabel(transcription.language)}</Badge>
         {transcription.audio_size > 0 && <Badge>{formatFileSize(transcription.audio_size)}</Badge>}
         {transcription.translated_to && (
           <Badge tone="brand">🌐 Traducido a {translationLanguageLabel(transcription.translated_to)}</Badge>

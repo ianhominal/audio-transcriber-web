@@ -76,7 +76,7 @@ export default async function AjustesPage({
             </span>
             <div>
               <h2 className="font-semibold text-foreground">Apariencia</h2>
-              <p className="text-sm text-tertiary">Elegí el tema de la interfaz.</p>
+              <p className="text-sm text-tertiary">Elegí cómo se ve la app.</p>
             </div>
           </div>
           <ThemeToggle />

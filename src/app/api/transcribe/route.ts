@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "El servidor no tiene configurada la clave de Groq." },
+      { error: "El servicio de transcripción no está disponible en este momento." },
       { status: 500 }
     );
   }
@@ -151,7 +151,10 @@ export async function POST(req: NextRequest) {
       body: groqForm,
     });
   } catch {
-    return NextResponse.json({ error: "No se pudo contactar a Groq." }, { status: 502 });
+    return NextResponse.json(
+      { error: "No se pudo conectar con el servicio de transcripción. Probá de nuevo en un momento." },
+      { status: 502 }
+    );
   }
 
   // Cuota diaria agotada → mensaje amigable ("pausado para todos" hoy).
@@ -172,7 +175,7 @@ export async function POST(req: NextRequest) {
 
   if (!groqResp.ok) {
     return NextResponse.json(
-      { error: data?.error?.message || `Groq devolvió ${groqResp.status}.` },
+      { error: data?.error?.message || "No se pudo completar la transcripción. Probá de nuevo." },
       { status: groqResp.status }
     );
   }

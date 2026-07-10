@@ -19,3 +19,13 @@ export function resolveGroqModel(input: unknown): GroqModel {
   }
   return DEFAULT_GROQ_MODEL;
 }
+
+/**
+ * Etiqueta legible de "Calidad" para mostrar en la UI (badge del detalle, etc.) sin exponer el
+ * nombre técnico del modelo — mismo texto que ya usan los selectores de Ajustes/Transcribir.
+ */
+export function qualityLabel(model: string): string {
+  if (model === "whisper-large-v3-turbo") return "Rápida";
+  if (model === "whisper-large-v3") return "Máxima calidad";
+  return "Calidad estándar";
+}

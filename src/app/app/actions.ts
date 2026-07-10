@@ -186,7 +186,7 @@ export async function createSubproject(
     if (isMissingColumnError(error)) {
       return {
         ok: false,
-        error: "Las subcarpetas todavía no están disponibles: falta aplicar una actualización pendiente de la base de datos.",
+        error: "Las subcarpetas todavía no están disponibles para tu cuenta. Probá de nuevo más tarde.",
       };
     }
     return { ok: false, error: "No se pudo crear la subcarpeta." };

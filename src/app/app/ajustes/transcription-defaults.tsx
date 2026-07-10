@@ -8,8 +8,11 @@ import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
 type SavingField = "language" | "quality" | null;
 
 /**
- * Sección "Transcripción" de Ajustes: edita los defaults persistentes (Motor/Calidad/Idioma) que
- * `TranscribeWorkspace` usa para pre-seleccionar cada vez — ver ROADMAP.md, ítem F1.
+ * Sección "Transcripción" de Ajustes: edita los defaults persistentes (Calidad/Idioma) que
+ * `TranscribeWorkspace` usa para pre-seleccionar cada vez — ver ROADMAP.md, ítem F1. El motor
+ * (`engine`) no tiene control en esta UI (hoy solo existe uno, ver `validate.ts`): sigue
+ * viajando con su default fijo en cada `save()`, que solo manda el patch de los campos que sí
+ * tienen selector.
  *
  * Autoguarda al cambiar cada selector (sin botón "Guardar" aparte, mismo criterio que un panel de
  * Configuración estilo VS Code). `initialDefaults` viene del server component (ya resuelto contra
@@ -57,7 +60,7 @@ export function TranscriptionDefaultsSection({
         <div>
           <h2 className="font-semibold text-foreground">Transcripción</h2>
           <p className="text-sm text-tertiary">
-            Defaults para cada transcripción nueva. Se pueden cambiar puntualmente al transcribir sin tocar esto.
+            Estas opciones se aplican a cada transcripción nueva (las podés cambiar en el momento si hace falta).
           </p>
         </div>
       </div>
@@ -84,20 +87,14 @@ export function TranscriptionDefaultsSection({
             disabled={savingField === "quality"}
             className="rounded-lg border border-border-strong px-3 py-2 focus:border-accent disabled:opacity-60"
           >
-            <option value="whisper-large-v3-turbo">Rápida (turbo)</option>
-            <option value="whisper-large-v3">Máxima (large-v3)</option>
+            <option value="whisper-large-v3-turbo">Rápida</option>
+            <option value="whisper-large-v3">Máxima calidad</option>
           </select>
+          <span className="mt-1 max-w-[16rem] text-xs text-tertiary">
+            Rápida es ideal para audios largos; Máxima calidad prioriza la precisión.
+          </span>
         </label>
-        <div className="flex flex-col text-sm">
-          <span className="mb-1 font-semibold text-tertiary">Motor</span>
-          <p className="flex items-center gap-1.5 rounded-lg border border-border-strong bg-background px-3 py-2 text-secondary">
-            Groq Whisper
-          </p>
-        </div>
       </div>
-      <p className="mt-2 text-xs text-tertiary">
-        Por ahora la web transcribe solo con Groq — el selector de Motor se habilita cuando sumemos otro proveedor acá.
-      </p>
     </div>
   );
 }

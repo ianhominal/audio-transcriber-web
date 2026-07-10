@@ -24,6 +24,17 @@ export function resolveLanguage(input: unknown): Language {
     : DEFAULT_LANGUAGE;
 }
 
+const LANGUAGE_LABELS: Record<Language, string> = {
+  es: "Español",
+  en: "Inglés",
+  auto: "Automático",
+};
+
+/** Nombre legible de un código de idioma de transcripción — para mostrar en la UI (badges, etc). */
+export function languageLabel(code: string): string {
+  return (LANGUAGE_LABELS as Record<string, string>)[code] ?? code;
+}
+
 /** Valida el motor pedido contra una allowlist estricta; cualquier otro valor cae al default. */
 export function resolveEngine(input: unknown): Engine {
   if (typeof input !== "string") return DEFAULT_ENGINE;
