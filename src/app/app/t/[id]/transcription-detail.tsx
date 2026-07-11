@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import type { UIMessage } from "ai";
 import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
 import { requestGoogleDriveAccessToken, uploadMarkdownToDrive, DriveAuthError } from "@/lib/googleDrive";
 import {
@@ -21,6 +22,7 @@ import { qualityLabel } from "@/lib/transcribe/model";
 import { languageLabel } from "@/lib/settings/validate";
 import { canSummarizeText } from "@/lib/summary/validate";
 import type { SummaryResult } from "@/lib/summary/format";
+import { ChatPanel } from "./chat-panel";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
 
@@ -57,6 +59,7 @@ export function TranscriptionDetail({
   audioSrc,
   initialSummary,
   summaryStale,
+  initialChatMessages,
 }: {
   transcription: Transcription;
   projects: Project[];
@@ -67,6 +70,9 @@ export function TranscriptionDetail({
   // recibe el hash crudo, solo el resultado ya interpretado.
   initialSummary: SummaryResult | null;
   summaryStale: boolean;
+  // Chat con IA (ver ROADMAP.md): historial ya resuelto a `UIMessage[]` desde el server component
+  // (`page.tsx`, `rowsToUIMessages`) — mismo criterio que el resumen.
+  initialChatMessages: UIMessage[];
 }) {
   const router = useRouter();
   const { show: toast } = useToast();
@@ -475,6 +481,17 @@ export function TranscriptionDetail({
           )}
         </div>
       </div>
+
+      {/* Chat con IA sobre esta transcripción (MVP por-transcripción, ver ROADMAP.md). Bloqueado
+          mientras hay cambios de texto sin guardar — mismo criterio que el botón de Resumen: la IA
+          siempre responde en base al texto GUARDADO (lo que lee `/api/chat` de la DB), nunca al
+          borrador visible en el textarea de abajo. */}
+      <ChatPanel
+        transcriptionId={transcription.id}
+        initialMessages={initialChatMessages}
+        disabled={dirty}
+        disabledReason={dirty ? "Guardá los cambios de texto antes de usar el chat." : undefined}
+      />
 
       {/* Texto editable */}
       <textarea

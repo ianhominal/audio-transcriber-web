@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AUDIO_BUCKET } from "@/lib/storage";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { isMissingColumnError, isMissingTableError } from "@/lib/supabase/schema-compat";
 import { parseStoredSummary } from "@/lib/summary/format";
 import { hashSummarySource } from "@/lib/summary/hash";
+import { rowsToUIMessages, type ChatMessageRow } from "@/lib/chat/messages";
 import { TranscriptionDetail } from "./transcription-detail";
 
 const BASE_COLUMNS =
@@ -29,7 +30,7 @@ export default async function TranscriptionPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [transcriptionResult, { data: projectsData }] = await Promise.all([
+  const [transcriptionResult, { data: projectsData }, chatMessagesResult] = await Promise.all([
     supabase
       .from("transcriptions")
       .select(COLUMNS_WITH_VOCABULARY)
@@ -41,7 +42,21 @@ export default async function TranscriptionPage({
       .select("id, name, icon")
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
+    // Chat con IA (ver ROADMAP.md): historial cargado server-side, mismo criterio que el resumen —
+    // el cliente (`chat-panel.tsx`) recibe el shape final (`UIMessage[]`), no reinterpreta filas de
+    // DB. `chat_messages` es tabla NUEVA (migración `20260710140000_chat_messages.sql`): si todavía
+    // no está aplicada, degrada a historial vacío (`isMissingTableError`) en vez de romper la
+    // página — mismo criterio que `vocabulary_terms`/`ai_usage_log`.
+    supabase
+      .from("chat_messages")
+      .select("id, role, content")
+      .eq("transcription_id", id)
+      .order("created_at", { ascending: true }),
   ]);
+
+  const initialChatMessages = isMissingTableError(chatMessagesResult.error)
+    ? []
+    : rowsToUIMessages((chatMessagesResult.data as ChatMessageRow[] | null) ?? []);
 
   let t = transcriptionResult.data;
   if (!t && isMissingColumnError(transcriptionResult.error)) {
@@ -109,6 +124,7 @@ export default async function TranscriptionPage({
         audioSrc={audioSrc}
         initialSummary={summary}
         summaryStale={summaryStale}
+        initialChatMessages={initialChatMessages}
       />
     </div>
   );

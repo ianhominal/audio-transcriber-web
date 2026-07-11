@@ -32,12 +32,25 @@ export const SUMMARY_DAILY_LIMIT = 100;
  */
 export const SUMMARY_FORCE_DAILY_LIMIT = 20;
 
+/**
+ * Tope de mensajes de chat (llamadas reales a Groq) que un usuario puede mandar por día — mismo
+ * mecanismo reserve-on-attempt que `SUMMARY_DAILY_LIMIT`, vía un segundo trigger `BEFORE INSERT`
+ * independiente sobre `ai_usage_log` (`kind = 'chat'`, ver migración
+ * `20260710140000_chat_messages.sql`). A diferencia del resumen, el chat NO tiene un cache que
+ * absorba la mayoría de los pedidos (cada mensaje es una pregunta distinta) — el número es más alto
+ * que `SUMMARY_DAILY_LIMIT` para no cortar una conversación normal de varias idas y vueltas, pero
+ * sigue acotando el costo/abuso sobre la GROQ_API_KEY compartida. DEBE coincidir con el número
+ * hardcodeado en el trigger `enforce_ai_usage_chat_limit`.
+ */
+export const CHAT_DAILY_LIMIT = 60;
+
 // Tokens estables que raise-ea el trigger BEFORE INSERT (ver migración). Se detectan por substring
 // en el mensaje del error de PostgREST — mismo mecanismo que `isTermLimitError` en
 // `src/lib/vocabulary/store.ts`, elegido a propósito para no depender del SQLSTATE (que PostgREST no
 // siempre preserva). Nunca se reenvía el mensaje crudo al cliente.
 const SUMMARY_DAILY_LIMIT_TOKEN = "ai_summary_daily_limit_reached";
 const SUMMARY_FORCE_LIMIT_TOKEN = "ai_summary_force_daily_limit_reached";
+const CHAT_DAILY_LIMIT_TOKEN = "ai_chat_daily_limit_reached";
 
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite DIARIO total. */
 export function isAiSummaryDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
@@ -47,4 +60,9 @@ export function isAiSummaryDailyLimitError(error: { message?: unknown } | null |
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite de REGENERACIONES. */
 export function isAiSummaryForceLimitError(error: { message?: unknown } | null | undefined): boolean {
   return !!error && typeof error.message === "string" && error.message.includes(SUMMARY_FORCE_LIMIT_TOKEN);
+}
+
+/** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite diario de CHAT. */
+export function isAiChatDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
+  return !!error && typeof error.message === "string" && error.message.includes(CHAT_DAILY_LIMIT_TOKEN);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isAiSummaryDailyLimitError, isAiSummaryForceLimitError } from "./aiUsage";
+import { isAiSummaryDailyLimitError, isAiSummaryForceLimitError, isAiChatDailyLimitError } from "./aiUsage";
 
 describe("isAiSummaryDailyLimitError / isAiSummaryForceLimitError", () => {
   it("detecta el token del límite diario en el mensaje del trigger", () => {
@@ -27,5 +27,28 @@ describe("isAiSummaryDailyLimitError / isAiSummaryForceLimitError", () => {
     expect(isAiSummaryDailyLimitError({ message: 42 })).toBe(false);
     expect(isAiSummaryForceLimitError(null)).toBe(false);
     expect(isAiSummaryForceLimitError({ message: "otro error cualquiera" })).toBe(false);
+  });
+});
+
+describe("isAiChatDailyLimitError", () => {
+  it("detecta el token del límite diario de chat en el mensaje del trigger", () => {
+    expect(isAiChatDailyLimitError({ message: "ai_chat_daily_limit_reached" })).toBe(true);
+    expect(
+      isAiChatDailyLimitError({ message: 'error: ai_chat_daily_limit_reached (PL/pgSQL function ...)' })
+    ).toBe(true);
+  });
+
+  it("NO confunde el token de chat con los de resumen y viceversa", () => {
+    expect(isAiChatDailyLimitError({ message: "ai_summary_daily_limit_reached" })).toBe(false);
+    expect(isAiChatDailyLimitError({ message: "ai_summary_force_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryDailyLimitError({ message: "ai_chat_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryForceLimitError({ message: "ai_chat_daily_limit_reached" })).toBe(false);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isAiChatDailyLimitError(null)).toBe(false);
+    expect(isAiChatDailyLimitError(undefined)).toBe(false);
+    expect(isAiChatDailyLimitError({})).toBe(false);
+    expect(isAiChatDailyLimitError({ message: 42 })).toBe(false);
   });
 });
