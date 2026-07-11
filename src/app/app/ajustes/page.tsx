@@ -1,12 +1,15 @@
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
 import { getDriveConnectionStatusCompat } from "@/lib/drive/connection-status-compat";
 import { getUserSettings } from "@/lib/settings/user-settings";
 import { listVocabularyTerms } from "@/lib/vocabulary/store";
+import { listMcpTokens } from "@/lib/mcp-tokens/store";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DriveFolderConnect } from "./drive-folder-connect";
 import { TranscriptionDefaultsSection } from "./transcription-defaults";
 import { VocabularySection } from "./vocabulary-section";
+import { MCPTokensSection } from "./mcp-tokens-section";
 
 const DRIVE_STATUS_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Conectado con Google Drive." },
@@ -38,17 +41,42 @@ export default async function AjustesPage({
   // `status` distingue conexión ACTIVA de token revocado por Google (el usuario existe en
   // `drive_connections` pero ya no sirve) — ver migración `20260707140000_drive_connection_status.sql`
   // y `src/lib/drive/connection-status-compat.ts` (degrada a 'active' si la migración no corrió).
-  // Independiente de los defaults de transcripción y del vocabulario — se piden en paralelo, no
-  // encadenados.
-  const [connectionStatus, transcriptionDefaults, vocabularyTerms] = user
+  // Independent of the transcription defaults, vocabulary, and MCP tokens fetches below — all
+  // fetched in parallel, not chained.
+  const [connectionStatus, transcriptionDefaults, vocabularyTerms, mcpTokens] = user
     ? await Promise.all([
         getDriveConnectionStatusCompat(supabase, user.id),
         getUserSettings(supabase, user.id),
         listVocabularyTerms(supabase, user.id),
+        listMcpTokens(supabase, user.id),
       ])
-    : [null, null, []];
+    : [null, null, [], []];
   const isConnected = connectionStatus !== null;
   const isRevoked = connectionStatus === "revoked";
+
+  // Canonical origin for the MCP endpoint URL shown below — pasted verbatim into an external MCP
+  // client's config as a long-lived credential-bearing URL, so a STABLE, correct origin matters
+  // more here than for a one-off redirect. There is no `NEXT_PUBLIC_SITE_URL` or equivalent custom
+  // env var in this project (verified before writing this).
+  //
+  // Preference order: (1) on Vercel, `VERCEL_PROJECT_PRODUCTION_URL` — a system env var, set at
+  // both build and runtime, domain-only (no protocol scheme), always the project's shortest
+  // production custom domain (or *.vercel.app if none) and — per Vercel's own docs — "always set,
+  // even in preview deployments" — so the URL shown is always the stable production endpoint,
+  // never a throwaway preview domain. (2) Fall back to reading the request's own `host`/
+  // `x-forwarded-proto` headers (the same data `req.nextUrl.origin` gives a route handler, but
+  // this is a Server Component with no direct `req`, so `headers()` — async since Next 15+, same
+  // as `cookies()` in `src/lib/supabase/server.ts` — is the idiomatic way to get it) for local dev
+  // (no such env var exists there) and for any non-Vercel deployment, so `npm run dev` and
+  // self-hosting both keep working unchanged.
+  const headersList = await headers();
+  const host = headersList.get("host") ?? "localhost:3000";
+  const isLocalHost = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  const protocol = headersList.get("x-forwarded-proto") ?? (isLocalHost ? "http" : "https");
+  const mcpEndpointUrl =
+    !isLocalHost && process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}/api/mcp`
+      : `${protocol}://${host}/api/mcp`;
 
   const message = driveStatus ? DRIVE_STATUS_MESSAGES[driveStatus] : null;
 
@@ -145,6 +173,12 @@ export default async function AjustesPage({
           </div>
         )}
       </section>
+
+      {user && (
+        <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+          <MCPTokensSection initialTokens={mcpTokens} mcpEndpointUrl={mcpEndpointUrl} />
+        </section>
+      )}
     </div>
   );
 }
