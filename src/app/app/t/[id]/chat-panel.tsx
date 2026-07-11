@@ -5,10 +5,11 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { Button } from "@/components/ui/Button";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useToast } from "@/components/ui/Toast";
 import { isValidChatMessageText, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/config";
 import { parseChatErrorMessage } from "@/lib/chat/errors";
-import { getMessageText } from "@/lib/chat/message";
+import { getMessageText, shouldRenderMarkdown } from "@/lib/chat/message";
 
 const SUGGESTIONS = [
   "Resumí esto",
@@ -126,11 +127,25 @@ export function ChatPanel({
                   : "max-w-[85%] rounded-2xl border border-border bg-background px-3.5 py-2 text-sm text-foreground"
               }
             >
+              {/* Respuestas del asistente se renderizan como Markdown restringido (`markdownToSafeHtml`,
+                  quick win "renderizar markdown en pantalla", 2026-07-11) — antes se veían con los
+                  `**`/`##` crudos a la vista. Los mensajes de la usuaria quedan en texto plano
+                  (`shouldRenderMarkdown`, ver `src/lib/chat/message.ts`): ella escribe preguntas, no
+                  Markdown. Seguro durante el streaming sin ningún manejo especial acá: cada re-render
+                  vuelve a parsear el `part.text` COMPLETO hasta ese momento desde cero (sin estado
+                  incremental), y `markdownToSafeHtml` nunca deja una tag a medio abrir para ningún
+                  prefijo posible del texto (verificado con un test dedicado en `markdown.test.ts`) —
+                  así que un `**negrita` o un `## Título` a medio llegar simplemente se ve como
+                  asteriscos/numerales literales hasta que el cierre llega, nunca rompe el layout. */}
               {message.parts.map((part, i) =>
                 part.type === "text" ? (
-                  <span key={i} className="whitespace-pre-wrap">
-                    {part.text}
-                  </span>
+                  shouldRenderMarkdown(message.role) ? (
+                    <MarkdownContent key={i} text={part.text} />
+                  ) : (
+                    <span key={i} className="whitespace-pre-wrap">
+                      {part.text}
+                    </span>
+                  )
                 ) : null
               )}
             </div>

@@ -17,6 +17,7 @@ import { Button, buttonClasses } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useToast } from "@/components/ui/Toast";
 import { useViewportClamp } from "@/hooks/useViewportClamp";
 import { translationLanguageLabel } from "@/lib/translate/languages";
@@ -494,13 +495,18 @@ export function TranscriptionDetail({
                   ⚠️ El texto cambió desde que se generó este resumen — puede estar desactualizado.
                 </p>
               )}
-              <p className="text-sm text-secondary">{summary.summary}</p>
+              {/* Renderizado como Markdown restringido (quick win "renderizar markdown en pantalla",
+                  2026-07-11) — antes se mostraban crudos (`**`/`##` a la vista si el modelo los
+                  usaba). Mismo `<MarkdownContent>` que las respuestas del chat, ver `chat-panel.tsx`. */}
+              <MarkdownContent text={summary.summary} className="text-sm text-secondary" />
               {summary.keyPoints.length > 0 && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">Puntos clave</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-secondary">
                     {summary.keyPoints.map((point, i) => (
-                      <li key={i}>{point}</li>
+                      <li key={i}>
+                        <MarkdownContent text={point} />
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -510,7 +516,9 @@ export function TranscriptionDetail({
                   <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">Tareas y próximos pasos</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-secondary">
                     {summary.actionItems.map((item, i) => (
-                      <li key={i}>{item}</li>
+                      <li key={i}>
+                        <MarkdownContent text={item} />
+                      </li>
                     ))}
                   </ul>
                 </div>

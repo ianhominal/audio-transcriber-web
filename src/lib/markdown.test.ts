@@ -101,3 +101,78 @@ describe("markdownToSafeHtml", () => {
     expect(html).toBe("<p>Dijo &quot;hola&quot; y &#39;chau&#39;.</p>");
   });
 });
+
+/**
+ * Cuenta caracteres de apertura/cierre de tags conocidos en el output y confirma que cierran
+ * balanceados — `<br>` es el único elemento vacío que emite el renderer (sin cierre, a propósito).
+ * Sirve para el streaming: en cada re-render con texto parcial, `markdownToSafeHtml` vuelve a
+ * parsear TODO el string desde cero (no hay estado incremental), así que si el resultado da HTML
+ * balanceado para CADA prefijo posible de un mensaje, nunca puede quedar una tag a medio abrir en
+ * pantalla mientras el chat está streameando.
+ */
+function isTagBalanced(html: string): boolean {
+  const stack: string[] = [];
+  const tagRe = /<\/?([a-z0-9]+)>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tagRe.exec(html))) {
+    const [full, name] = match;
+    const tag = name.toLowerCase();
+    if (tag === "br") continue; // elemento vacío, sin cierre
+    if (full.startsWith("</")) {
+      if (stack.pop() !== tag) return false;
+    } else {
+      stack.push(tag);
+    }
+  }
+  return stack.length === 0;
+}
+
+describe("markdownToSafeHtml — streaming parcial (el texto llega a medias, chat con IA)", () => {
+  it("negrita sin cerrar todavía queda como asteriscos literales, sin romper", () => {
+    expect(markdownToSafeHtml("Esto es **en vivo")).toBe("<p>Esto es **en vivo</p>");
+  });
+
+  it("cursiva con * sin cerrar todavía queda como asterisco literal, sin romper", () => {
+    expect(markdownToSafeHtml("Una idea *a medio")).toBe("<p>Una idea *a medio</p>");
+  });
+
+  it("cursiva con _ sin cerrar todavía queda como guion bajo literal, sin romper", () => {
+    expect(markdownToSafeHtml("Una idea _a medio")).toBe("<p>Una idea _a medio</p>");
+  });
+
+  it("heading a medio escribir ya se renderiza completo (nunca queda una tag abierta)", () => {
+    expect(markdownToSafeHtml("## Titu")).toBe("<h2>Titu</h2>");
+  });
+
+  it("solo los numerales sin espacio ni texto todavía caen a párrafo (no hay heading vacío)", () => {
+    expect(markdownToSafeHtml("##")).toBe("<p>##</p>");
+  });
+
+  it("bullet a medio escribir ya se renderiza como lista completa", () => {
+    expect(markdownToSafeHtml("- Ite")).toBe("<ul><li>Ite</li></ul>");
+  });
+
+  it("guion solo (todavía sin espacio ni texto) cae a párrafo, no a lista vacía", () => {
+    expect(markdownToSafeHtml("-")).toBe("<p>-</p>");
+  });
+
+  it("cada prefijo de un mensaje completo (heading+negrita+cursiva+listas) da HTML con tags balanceadas", () => {
+    const full =
+      "## Resumen en vivo\n\nUn párrafo con **negrita** y *cursiva*, más _otra cursiva_.\n\n" +
+      "- Uno\n- Dos\n- Tres\n\n1. Primero\n2. Segundo";
+    for (let i = 1; i <= full.length; i++) {
+      const partial = full.slice(0, i);
+      expect(() => markdownToSafeHtml(partial)).not.toThrow();
+      expect(isTagBalanced(markdownToSafeHtml(partial))).toBe(true);
+    }
+  });
+
+  it("re-parsear el string completo desde cero da el mismo resultado final que ir agregando de a un caracter (sin estado colgado entre renders)", () => {
+    const full = "# Título\n\nHola **mundo**.";
+    let last = "";
+    for (let i = 1; i <= full.length; i++) {
+      last = markdownToSafeHtml(full.slice(0, i));
+    }
+    expect(last).toBe(markdownToSafeHtml(full));
+  });
+});

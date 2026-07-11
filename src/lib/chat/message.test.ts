@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getMessageText } from "./message";
+import { getMessageText, shouldRenderMarkdown } from "./message";
 
 describe("getMessageText", () => {
   it("devuelve el texto de una parte 'text' única", () => {
@@ -34,5 +34,19 @@ describe("getMessageText", () => {
   it("devuelve cadena vacía si no hay partes de texto", () => {
     expect(getMessageText({ parts: [{ type: "step-start" }] })).toBe("");
     expect(getMessageText({ parts: [] })).toBe("");
+  });
+});
+
+describe("shouldRenderMarkdown", () => {
+  it("la usuaria escribe texto plano — sus mensajes NUNCA se renderizan como markdown", () => {
+    expect(shouldRenderMarkdown("user")).toBe(false);
+  });
+
+  it("las respuestas del asistente sí se renderizan como markdown", () => {
+    expect(shouldRenderMarkdown("assistant")).toBe(true);
+  });
+
+  it("un rol 'system' (si alguna vez llegara a pintarse) se trata igual que el asistente, no como la usuaria", () => {
+    expect(shouldRenderMarkdown("system")).toBe(true);
   });
 });
