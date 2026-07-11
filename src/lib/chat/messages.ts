@@ -48,3 +48,35 @@ export function rowsToUIMessages(rows: readonly ChatMessageRow[]): UIMessage[] {
     parts: [{ type: "text", text: row.content }],
   }));
 }
+
+/**
+ * Recorta el historial que se manda como contexto a Groq (ver `MAX_CHAT_HISTORY_MESSAGES`/
+ * `MAX_CHAT_HISTORY_CHARS` en `src/lib/chat/config.ts`) — corrección del review adversarial: el
+ * server reconstruye el historial desde `chat_messages` (no confía en el array que mande el
+ * cliente), así que este es el cap real de costo/contexto, sin importar cuántas filas existan.
+ *
+ * `rows` se asume YA en orden cronológico ascendente (mismo orden que devuelve la query de
+ * `chat_messages`, ver `src/app/api/chat/route.ts`). Se queda con las últimas `maxMessages` filas
+ * y, si su contenido combinado igual supera `maxTotalChars`, sigue descartando desde las MÁS VIEJAS
+ * — nunca desde las más recientes (el mensaje más nuevo del historial es el más relevante para la
+ * pregunta actual). Siempre deja al menos 1 fila si `rows` no está vacío, aunque esa única fila ya
+ * supere `maxTotalChars` por sí sola (mejor un contexto recortado por otro lado que perder toda la
+ * conversación reciente).
+ *
+ * Pura: solo maneja arrays en memoria, no toca Supabase.
+ */
+export function capChatHistory(
+  rows: readonly ChatMessageRow[],
+  limits: { maxMessages: number; maxTotalChars: number }
+): ChatMessageRow[] {
+  const recent = limits.maxMessages > 0 ? rows.slice(Math.max(0, rows.length - limits.maxMessages)) : rows.slice();
+
+  let totalChars = recent.reduce((sum, row) => sum + row.content.length, 0);
+  let start = 0;
+  while (totalChars > limits.maxTotalChars && start < recent.length - 1) {
+    totalChars -= recent[start].content.length;
+    start += 1;
+  }
+
+  return recent.slice(start);
+}

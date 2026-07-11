@@ -4,6 +4,9 @@ import { useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
+import { isValidChatMessageText, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/config";
+import { parseChatErrorMessage } from "@/lib/chat/errors";
 
 const SUGGESTIONS = [
   "Resumí esto",
@@ -17,6 +20,12 @@ const SUGGESTIONS = [
  * SDK v6 (`@ai-sdk/react`) contra `/api/chat` — el historial (`initialMessages`) ya viene resuelto
  * desde el server component (`page.tsx`), mismo criterio que el resumen: el cliente no reinterpreta
  * filas de DB, solo recibe el shape final.
+ *
+ * `prepareSendMessagesRequest` manda SOLO el mensaje nuevo (no el array completo de `messages`) —
+ * el server reconstruye el historial leyendo `chat_messages` directamente (ver
+ * `src/app/api/chat/route.ts`), corrección del review adversarial: un cliente que mandara el
+ * historial completo podía inflarlo arbitrariamente o inyectar roles falsos sin que ningún cap lo
+ * frenara.
  *
  * `disabled`/`disabledReason` (pasados desde `transcription-detail.tsx`) bloquean el envío mientras
  * hay cambios de texto sin guardar — mismo criterio que el panel de Resumen (`summarize()`), para que
@@ -33,13 +42,16 @@ export function ChatPanel({
   disabled: boolean;
   disabledReason?: string;
 }) {
+  const { show: toast } = useToast();
   const [input, setInput] = useState("");
-  const { messages, sendMessage, status, error, regenerate } = useChat({
+  const { messages, sendMessage, status, error, regenerate, stop } = useChat({
     id: transcriptionId,
     messages: initialMessages,
     transport: new DefaultChatTransport({
       api: "/api/chat",
-      body: { transcriptionId },
+      prepareSendMessagesRequest: ({ messages: current }) => ({
+        body: { transcriptionId, message: current[current.length - 1] },
+      }),
     }),
   });
 
@@ -49,6 +61,14 @@ export function ChatPanel({
   function submit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || inputDisabled) return;
+    // Mismo cap que valida el server (`isValidChatMessageText`, ver `src/lib/chat/config.ts`) —
+    // corrección del review adversarial: antes un mensaje demasiado largo se mandaba igual, quedaba
+    // "atascado" en el historial local con un 400 sin explicación clara y un "Reintentar" que iba a
+    // fallar exactamente igual (el texto sigue siendo el mismo). Validar acá evita el viaje inútil.
+    if (!isValidChatMessageText(trimmed)) {
+      toast(`Tu mensaje es muy largo (máximo ${MAX_CHAT_MESSAGE_CHARS.toLocaleString("es-AR")} caracteres).`, "error");
+      return;
+    }
     sendMessage({ text: trimmed });
     setInput("");
   }
@@ -68,10 +88,14 @@ export function ChatPanel({
       )}
 
       {/* Región viva: cada mensaje nuevo (de la usuaria o de la IA) se anuncia a un lector de
-          pantalla sin que tenga que ir a buscarlo — `role="log"` es el patrón ARIA pensado para
-          este caso (transcripción de conversación que crece), a diferencia de `role="status"` que
-          usa el panel de Resumen (un único bloque de resultado, no una lista que se acumula). */}
-      <div role="log" aria-live="polite" aria-relevant="additions" className="mt-3 max-h-96 space-y-3 overflow-y-auto">
+          pantalla sin que tenga que ir a buscarlo. `role="log"` es el patrón ARIA pensado para este
+          caso (transcripción de conversación que crece), a diferencia de `role="status"` que usa el
+          panel de Resumen (un único bloque de resultado, no una lista que se acumula). SIN
+          `aria-relevant` explícito a propósito (corrección del review adversarial): restringirlo a
+          `"additions"` deja de anunciar las MUTACIONES de texto de un mensaje ya insertado — y la
+          respuesta de la IA se arma así, como texto que se va completando dentro de la MISMA burbuja
+          a medida que llega el stream. El default del rol (`"additions text"`) sí cubre ambos casos. */}
+      <div role="log" aria-live="polite" className="mt-3 max-h-96 space-y-3 overflow-y-auto">
         {messages.length === 0 && (
           <div className="flex flex-wrap gap-2">
             {SUGGESTIONS.map((suggestion) => (
@@ -118,8 +142,8 @@ export function ChatPanel({
       </div>
 
       {error && (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-400/15 dark:text-red-300">
-          <span>No pudimos generar la respuesta.</span>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-400/15 dark:text-red-200">
+          <span>{parseChatErrorMessage(error)}</span>
           <button type="button" onClick={() => regenerate()} className="font-semibold underline">
             Reintentar
           </button>
@@ -141,9 +165,15 @@ export function ChatPanel({
           aria-label="Mensaje para la IA"
           className="w-full rounded-lg border border-border-strong px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none disabled:opacity-50"
         />
-        <Button type="submit" size="sm" disabled={inputDisabled || !input.trim()} loading={status === "submitted"}>
-          Enviar
-        </Button>
+        {busy ? (
+          <Button type="button" variant="secondary" size="sm" onClick={() => stop()}>
+            Detener
+          </Button>
+        ) : (
+          <Button type="submit" size="sm" disabled={disabled || !input.trim()}>
+            Enviar
+          </Button>
+        )}
       </form>
     </div>
   );

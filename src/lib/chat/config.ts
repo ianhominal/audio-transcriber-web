@@ -48,6 +48,26 @@ export const MAX_CHAT_CONTEXT_INPUT_CHARS = 40_000;
 export const MAX_CHAT_MESSAGE_CHARS = 4_000;
 
 /**
+ * Topes del HISTORIAL de conversación que se manda como contexto en cada request (ver
+ * `capChatHistory` en `src/lib/chat/messages.ts`). Corrección del review adversarial (hallazgo
+ * WARNING de seguridad/costo): el route NO reconstruye el historial confiando en el array
+ * `messages` que mande el cliente (un caller podría fabricar un historial arbitrariamente grande, o
+ * inyectar roles `system`/`assistant` falsos, sin que ningún cap lo frene) — en cambio, el cliente
+ * manda SOLO el mensaje nuevo (`{ transcriptionId, message }`, patrón "sending only the last
+ * message" documentado por el AI SDK) y el server reconstruye el historial leyendo `chat_messages`
+ * (RLS-scoped, ya persistido por este mismo endpoint). Estos dos topes acotan el costo de ESE
+ * historial reconstruido sin importar cuántas filas existan en la tabla:
+ *   - `MAX_CHAT_HISTORY_MESSAGES`: como mucho las últimas 40 filas (20 idas y vueltas) — de sobra
+ *     para una conversación real sobre una transcripción puntual.
+ *   - `MAX_CHAT_HISTORY_CHARS`: además, se recorta desde las más VIEJAS hasta entrar en este
+ *     presupuesto total de caracteres — defensa ante mensajes históricos individualmente largos
+ *     (hasta 20.000 caracteres cada uno, ver `chat_messages_content_check` en la migración) que
+ *     igual podrían sumar un contexto desproporcionado aunque sean pocas filas.
+ */
+export const MAX_CHAT_HISTORY_MESSAGES = 40;
+export const MAX_CHAT_HISTORY_CHARS = 40_000;
+
+/**
  * true si `text` es un mensaje de usuario válido para mandar al chat: no vacío (después de trim) y
  * dentro de `MAX_CHAT_MESSAGE_CHARS`. Pura, sin acceso a red/DB — se llama desde el route ANTES de
  * llamar a Groq (la validación del cliente nunca es la frontera de confianza, mismo criterio que el
