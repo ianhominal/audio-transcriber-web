@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { Button } from "@/components/ui/Button";
+import { CopyButton } from "@/components/ui/CopyButton";
 import { useToast } from "@/components/ui/Toast";
 import { isValidChatMessageText, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/config";
 import { parseChatErrorMessage } from "@/lib/chat/errors";
+import { getMessageText } from "@/lib/chat/message";
 
 const SUGGESTIONS = [
   "Resumí esto",
@@ -113,7 +115,10 @@ export function ChatPanel({
         )}
 
         {messages.map((message) => (
-          <div key={message.id} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
+          <div
+            key={message.id}
+            className={message.role === "user" ? "flex flex-col items-end" : "flex flex-col items-start"}
+          >
             <div
               className={
                 message.role === "user"
@@ -129,6 +134,15 @@ export function ChatPanel({
                 ) : null
               )}
             </div>
+            {/* Copiar respuesta (quick win "sacar el output afuera", 2026-07-11) — solo en las
+                respuestas de la IA, no en los mensajes de la usuaria (nada nuevo que copiar ahí,
+                ella ya lo escribió). `getMessageText` junta las partes "text" del mensaje, mismo
+                filtro que ya aplica el render de arriba. */}
+            {message.role !== "user" && (
+              <div className="mt-1">
+                <CopyButton text={getMessageText(message)} label="Copiar" ariaLabel="Copiar esta respuesta" size="sm" />
+              </div>
+            )}
           </div>
         ))}
 

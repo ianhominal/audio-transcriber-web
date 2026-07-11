@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { UIMessage } from "ai";
 import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
+import { buildNoteMarkdown, buildNotePlainText, summaryToMarkdown } from "@/lib/noteExport";
 import { requestGoogleDriveAccessToken, uploadMarkdownToDrive, DriveAuthError } from "@/lib/googleDrive";
 import {
   updateTranscription,
@@ -15,6 +16,7 @@ import { EmojiPicker } from "../../emoji-picker";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
+import { CopyButton } from "@/components/ui/CopyButton";
 import { useToast } from "@/components/ui/Toast";
 import { useViewportClamp } from "@/hooks/useViewportClamp";
 import { translationLanguageLabel } from "@/lib/translate/languages";
@@ -92,7 +94,6 @@ export function TranscriptionDetail({
   const [projectId, setProjectId] = useState<string | null>(transcription.project_id);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
   // Fase F4: solo aplica a transcripciones traducidas (`translated_to`+`original_text` ambos
@@ -226,18 +227,25 @@ export function TranscriptionDetail({
     }
   }
 
-  async function copy() {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-  }
-
+  /**
+   * Baja la NOTA completa (título + fecha + resumen si existe + transcripción) como .txt plano —
+   * antes bajaba solo la transcripción cruda. Ver `buildNotePlainText` (quick win "sacar el output
+   * afuera", 2026-07-11). El nombre ahora se deriva del TÍTULO igual que `exportMarkdown`/
+   * `exportNoteMarkdown` (antes usaba `audio_name` sin slugificar).
+   */
   function download() {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const txt = buildNotePlainText({
+      title: title || transcription.audio_name,
+      createdAt: transcription.created_at,
+      projectName,
+      text,
+      summary,
+    });
+    const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${transcription.audio_name.replace(/\.[^.]+$/, "")}.txt`;
+    a.download = `${slugifyFileName(title || transcription.audio_name)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -271,6 +279,36 @@ export function TranscriptionDetail({
     URL.revokeObjectURL(url);
     setExportOpen(false);
     toast("Exportado como Markdown.", "success");
+  }
+
+  /**
+   * Nota completa (título + fecha + resumen si existe + transcripción) como Markdown "de lectura"
+   * bien estructurado (headings/negrita/viñetas) — para pegar en Docs/Notion o archivar suelta.
+   *
+   * Distinta de `exportMarkdown()` de arriba a propósito: ESA genera el formato
+   * frontmatter+cuerpo que el motor de sync de Drive lee de vuelta con `parseMarkdownExport` (todo
+   * lo que sigue al frontmatter se guarda tal cual como `transcriptions.text`, ver el comentario en
+   * `src/lib/format.ts`) — meterle acá una sección de resumen corrompería la transcripción en el
+   * próximo sync desde Drive. Por eso es una función y un ítem de menú separados, no una opción
+   * más del export a Obsidian/Drive.
+   */
+  function exportNoteMarkdown() {
+    const md = buildNoteMarkdown({
+      title: title || transcription.audio_name,
+      createdAt: transcription.created_at,
+      projectName,
+      text,
+      summary,
+    });
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slugifyFileName(title || transcription.audio_name)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setExportOpen(false);
+    toast("Nota exportada.", "success");
   }
 
   async function exportDrive() {
@@ -477,6 +515,7 @@ export function TranscriptionDetail({
                   </ul>
                 </div>
               )}
+              <CopyButton text={summaryToMarkdown(summary)} label="Copiar resumen" ariaLabel="Copiar el resumen" />
             </div>
           )}
         </div>
@@ -506,9 +545,7 @@ export function TranscriptionDetail({
         <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>
           {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
         </Button>
-        <Button variant="secondary" onClick={copy}>
-          {copied ? "Copiado ✓" : "Copiar"}
-        </Button>
+        <CopyButton text={text} label="Copiar" ariaLabel="Copiar la transcripción completa" size="md" />
         <Button variant="secondary" onClick={download}>
           Descargar .txt
         </Button>
@@ -551,6 +588,13 @@ export function TranscriptionDetail({
                   className="block w-full rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
                 >
                   📝 Obsidian / Markdown (.md)
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportNoteMarkdown}
+                  className="block w-full rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
+                >
+                  🗒️ Nota completa (.md)
                 </button>
                 <button
                   role="menuitem"
