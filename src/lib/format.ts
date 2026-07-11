@@ -61,6 +61,19 @@ export function normalizeQueueTitle(edited: string, fallback: string): string {
   return trimmed || fallback;
 }
 
+/**
+ * Título a mostrar en un ítem de la cola de transcripción una vez terminado (`done`/`duplicate`):
+ * preferí `responseTitle` (lo que devolvió `/api/transcribe` — el título auto-generado por IA, o el
+ * que ya tenía guardado si era un duplicado, ver paso 2.7 del route) y, si vino vacío/ausente (el
+ * paso de auto-título es best-effort y puede fallar o no correr, ver `src/lib/titleTags/groq.ts`),
+ * mantené `fallbackTitle` — el título que la cola ya mostraba (nombre de archivo, o el que la
+ * usuaria haya escrito a mano antes de transcribir). Nunca deja el ítem sin título.
+ */
+export function resolveQueueTitle(responseTitle: string | null | undefined, fallbackTitle: string): string {
+  const trimmed = (responseTitle ?? "").trim();
+  return trimmed || fallbackTitle;
+}
+
 export type ProjectNameResult = { ok: true; value: string } | { ok: false; error: string };
 
 /** Valida y normaliza el nombre de un proyecto. */

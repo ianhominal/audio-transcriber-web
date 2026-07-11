@@ -135,11 +135,19 @@ export async function POST(req: NextRequest) {
   //      `translated_to` puede no existir todavía en el esquema del preview (migración F4 sin
   //      aplicar) — ante un 42703 reintentamos sin esa columna y asumimos "no traducida" (`null`),
   //      mismo patrón de compat que el insert/select de más abajo.
-  let existing: { id: string; text: string | null; translated_to: string | null } | null = null;
+  // `title` se suma al SELECT (y al `reduced` de compat de abajo) sin ninguna cascada extra: a
+  // diferencia de `translated_to`/`tags`, la columna `title` viene de la migración más vieja de las
+  // tres (`20260706180000_transcription_title.sql`, previa incluso a F4) — si `translated_to` llega
+  // a faltar y dispara el fallback de compat, `title` YA existe igual, así que es seguro pedirla en
+  // los dos SELECT sin un nuevo nivel de `isMissingColumnError`. Hace falta para que la cola de
+  // `TranscribeWorkspace` pueda mostrar el título auto-generado también en un duplicado (ítem
+  // `status: "duplicate"`), no solo en una transcripción nueva.
+  let existing: { id: string; text: string | null; title: string | null; translated_to: string | null } | null =
+    null;
   {
     const withTranslated = await supabase
       .from("transcriptions")
-      .select("id, text, translated_to")
+      .select("id, text, title, translated_to")
       .eq("user_id", user.id)
       .eq("audio_name", audioName)
       .eq("audio_size", file.size)
@@ -151,7 +159,7 @@ export async function POST(req: NextRequest) {
     if (withTranslated.error && isMissingColumnError(withTranslated.error)) {
       const reduced = await supabase
         .from("transcriptions")
-        .select("id, text")
+        .select("id, text, title")
         .eq("user_id", user.id)
         .eq("audio_name", audioName)
         .eq("audio_size", file.size)
@@ -173,7 +181,15 @@ export async function POST(req: NextRequest) {
     // devolvía el texto traducido como si fuera la transcripción original, sin avisar).
     const alreadySatisfiesRequest = dedupeSatisfiesRequest(mode, existing.translated_to, targetLanguage);
     if (alreadySatisfiesRequest) {
-      return NextResponse.json({ text: existing.text ?? "", duplicate: true, id: existing.id });
+      // `title` viaja en la respuesta para que la cola (`TranscribeWorkspace`) pueda reflejar el
+      // título YA guardado (auto-generado o no) en vez de quedarse con el nombre de archivo del
+      // ítem — bugfix UX 2026-07-11, ver `src/lib/format.ts` (`resolveQueueTitle`).
+      return NextResponse.json({
+        text: existing.text ?? "",
+        duplicate: true,
+        id: existing.id,
+        title: existing.title ?? "",
+      });
     }
   }
 
@@ -449,6 +465,13 @@ export async function POST(req: NextRequest) {
   const projectId = (form.get("projectId") as string) || null;
   const finalTitle = autoTitle ?? title;
   let savedId: string | null = null;
+  // true solo si la fila terminó guardada CON la columna `tags` (el primer intento del cascade de
+  // abajo, el único que la incluye, salió sin error) — bugfix del review adversarial de este mismo
+  // cambio (2026-07-11): la respuesta de más abajo NO puede devolver `autoTags` a ciegas, porque si
+  // ese primer intento cae en la cascada de compat (columna `tags` sin migrar en este entorno), la
+  // fila real queda SIN tags aunque `autoTags` siga poblado en memoria — mismo criterio que
+  // `audioStored` ya usa (chequear el resultado real de la operación, no asumir éxito).
+  let tagsSaved = false;
   try {
     const baseRow = {
       user_id: user.id,
@@ -489,6 +512,7 @@ export async function POST(req: NextRequest) {
       })
       .select("id")
       .single();
+    tagsSaved = !insertResult.error;
 
     if (insertResult.error && isMissingColumnError(insertResult.error)) {
       insertResult = await supabase
@@ -532,10 +556,20 @@ export async function POST(req: NextRequest) {
     Sentry.captureException(err, { extra: { userId: user.id, stage: "transcription-insert" } });
   }
 
+  // `title`/`tags` viajan en la respuesta (mismos valores que se acaban de guardar en la fila, paso
+  // 2.7 más arriba) para que la cola de `TranscribeWorkspace` pueda reflejar el título auto-generado
+  // apenas termina de transcribir, sin que la usuaria tenga que entrar al detalle — bugfix UX
+  // 2026-07-11 (antes la cola se quedaba mostrando el nombre de archivo original). Best-effort: si el
+  // paso 2.7 no corrió o falló, `finalTitle` cae al título que mandó el cliente (el que ya mostraba
+  // la cola). `tags` usa `tagsSaved` (no `autoTags` a ciegas) para nunca devolver tags que la fila
+  // real no tiene — siempre `[]` en vez de `undefined`, así el front no necesita distinguir "no vino"
+  // de "vino vacío".
   return NextResponse.json({
     text: finalText,
     id: savedId,
     audioStored: audioPath !== null,
+    title: finalTitle,
+    tags: tagsSaved ? autoTags : [],
     ...(translationWarning ? { translationWarning } : {}),
   });
 }

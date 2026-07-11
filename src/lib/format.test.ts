@@ -7,6 +7,7 @@ import {
   formatRecordingFileName,
   defaultTitleFromFileName,
   normalizeQueueTitle,
+  resolveQueueTitle,
   buildMarkdownExport,
   parseMarkdownExport,
   slugifyFileName,
@@ -100,6 +101,28 @@ describe("normalizeQueueTitle", () => {
   it("tolera valores inválidos como si estuvieran vacíos", () => {
     // @ts-expect-error valor inválido a propósito, para probar la tolerancia en runtime
     expect(normalizeQueueTitle(undefined, "fallback")).toBe("fallback");
+  });
+});
+
+describe("resolveQueueTitle", () => {
+  it("prefiere el título de la respuesta del server sobre el fallback", () => {
+    expect(resolveQueueTitle("Reunión de equipo sobre el lanzamiento", "Grabacion-1720368000000")).toBe(
+      "Reunión de equipo sobre el lanzamiento"
+    );
+  });
+
+  it("recorta espacios del título de la respuesta", () => {
+    expect(resolveQueueTitle("  Título con espacios  ", "audio.mp3")).toBe("Título con espacios");
+  });
+
+  it("cae al fallback si el título de la respuesta viene vacío o solo espacios", () => {
+    expect(resolveQueueTitle("", "Grabacion-1720368000000")).toBe("Grabacion-1720368000000");
+    expect(resolveQueueTitle("   ", "audio.mp3")).toBe("audio.mp3");
+  });
+
+  it("cae al fallback si el título de la respuesta es null o undefined (auto-título best-effort falló)", () => {
+    expect(resolveQueueTitle(null, "Grabacion-1720368000000")).toBe("Grabacion-1720368000000");
+    expect(resolveQueueTitle(undefined, "audio.mp3")).toBe("audio.mp3");
   });
 });
 

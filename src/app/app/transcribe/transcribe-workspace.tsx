@@ -11,6 +11,7 @@ import {
   formatRecordingFileName,
   defaultTitleFromFileName,
   normalizeQueueTitle,
+  resolveQueueTitle,
 } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -66,7 +67,16 @@ type Item = {
   // "Grabacion-1720368000000"; para archivos subidos arranca en `file.name`. En ambos casos el
   // usuario puede editarlo inline en la cola (click en el título) antes de transcribir — ver JSX
   // de la cola más abajo y `normalizeQueueTitle` en @/lib/format.
+  //
+  // Una vez que el ítem pasa a "done"/"duplicate", `run()` lo actualiza con el título que devolvió
+  // `/api/transcribe` (el auto-generado por IA — paso 2.7 del route — o el ya guardado si era un
+  // duplicado), vía `resolveQueueTitle` — bugfix UX 2026-07-11: antes la cola se quedaba mostrando
+  // el nombre de archivo original aunque la IA ya hubiera generado un título mejor. Si ese paso
+  // best-effort no corrió o falló, `resolveQueueTitle` mantiene el título que ya estaba acá.
   title: string;
+  // Tags de tema auto-generados (mismo paso 2.7, best-effort). Ausente/vacío si el paso no corrió o
+  // no encontró tags — nunca bloquea el render de la cola (ver chips condicionales en el JSX).
+  tags?: string[];
 };
 
 let counter = 0;
@@ -418,6 +428,10 @@ export function TranscribeWorkspace({
         patch(item.key, {
           status: data.duplicate ? "duplicate" : "done",
           resultId: data.id ?? undefined,
+          // Título auto-generado por IA (o el que ya tenía guardado si era un duplicado) — cae al
+          // título que la cola ya mostraba si el server no mandó uno (ver `resolveQueueTitle`).
+          title: resolveQueueTitle(data.title, item.title),
+          tags: Array.isArray(data.tags) ? data.tags : undefined,
         });
         okCount++;
         if (!data.duplicate && data.audioStored === false) audioMissingCount++;
@@ -775,6 +789,22 @@ export function TranscribeWorkspace({
                 {it.status === "duplicate" && " · ya estaba guardado"}
                 {it.status === "error" && ` · ${it.error}`}
               </p>
+              {/* Tags de tema auto-generados (mismo paso 2.7 de /api/transcribe que el título) —
+                  solo una vez terminado el ítem y si el best-effort encontró alguno. Mismo tono
+                  visual que los chips de `transcription-row.tsx`/el detalle (`accent-subtle`), pero
+                  sin <Link>: acá es solo lectura, filtrar por tag ya existe desde el dashboard. */}
+              {(it.status === "done" || it.status === "duplicate") && it.tags && it.tags.length > 0 && (
+                <ul aria-label="Etiquetas" role="list" className="mt-1 flex flex-wrap gap-1">
+                  {it.tags.map((tag) => (
+                    <li
+                      key={tag}
+                      className="inline-flex items-center rounded-full bg-accent-subtle px-2 py-0.5 text-[11px] font-medium text-accent-subtle-text"
+                    >
+                      {tag}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
             {(it.status === "done" || it.status === "duplicate") && it.resultId && (
               <Link href={`/app/t/${it.resultId}`} className="text-xs font-semibold text-accent hover:underline">
