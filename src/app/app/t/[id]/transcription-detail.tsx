@@ -9,6 +9,7 @@ import { buildNoteMarkdown, buildNotePlainText, summaryToMarkdown } from "@/lib/
 import { requestGoogleDriveAccessToken, uploadMarkdownToDrive, DriveAuthError } from "@/lib/googleDrive";
 import {
   updateTranscription,
+  updateTranscriptionTags,
   assignTranscriptionToProject,
   deleteTranscription,
 } from "../../actions";
@@ -52,6 +53,10 @@ type Transcription = {
   // se intentó pero no hizo falta corregir nada, `null`/ausente si no aplica o la migración todavía
   // no está aplicada.
   vocabulary_corrected?: boolean | null;
+  // Tags de tema (tanda 3 de quick wins, ver ROADMAP.md): generados automáticamente al transcribir
+  // (best-effort) o quitados a mano desde acá — siempre un array (nunca undefined/null: la columna
+  // es NOT NULL DEFAULT '{}' y `page.tsx` ya degrada a `[]` durante la ventana de rollout).
+  tags: string[];
 };
 
 type Project = { id: string; name: string; icon: string };
@@ -93,6 +98,10 @@ export function TranscriptionDetail({
     icon: transcription.icon,
   });
   const [projectId, setProjectId] = useState<string | null>(transcription.project_id);
+  // Tags (tanda 3 de quick wins): guardado INMEDIATO al quitar un chip (ver `removeTag`), mismo
+  // criterio que `projectId`/`changeProject` — no pasa por el flujo `dirty`/"Guardar" de
+  // título/texto/descripción/ícono.
+  const [tags, setTags] = useState(transcription.tags);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -225,6 +234,19 @@ export function TranscriptionDetail({
     if (!res.ok) {
       setProjectId(previous);
       toast(res.error ?? "No se pudo mover la transcripción.", "error");
+    }
+  }
+
+  /** Quita un tag (chip "×" en Etiquetas) — guardado optimista con revert si falla, mismo patrón
+   * que `changeProject`. */
+  async function removeTag(tag: string) {
+    const previous = tags;
+    const next = previous.filter((t) => t !== tag);
+    setTags(next);
+    const res = await updateTranscriptionTags(transcription.id, next);
+    if (!res.ok) {
+      setTags(previous);
+      toast(res.error ?? "No se pudo quitar la etiqueta.", "error");
     }
   }
 
@@ -386,6 +408,34 @@ export function TranscriptionDetail({
         )}
         {transcription.vocabulary_corrected && <Badge tone="brand">📖 Corregido con tu vocabulario</Badge>}
       </div>
+
+      {/* Tags de tema (tanda 3 de quick wins, ver ROADMAP.md): generados automáticamente al
+          transcribir, editables (solo quitar por ahora — ver `updateTranscriptionTags`). */}
+      {tags.length > 0 && (
+        <div className="mt-3">
+          <p id="tags-heading" className="text-xs font-semibold uppercase tracking-wide text-tertiary">
+            Etiquetas
+          </p>
+          <ul aria-labelledby="tags-heading" role="list" className="mt-1.5 flex flex-wrap gap-1.5">
+            {tags.map((tag) => (
+              <li
+                key={tag}
+                className="inline-flex items-center gap-1 rounded-full bg-accent-subtle py-0.5 pl-2.5 pr-1.5 text-xs font-medium text-accent-subtle-text"
+              >
+                {tag}
+                <button
+                  type="button"
+                  onClick={() => removeTag(tag)}
+                  aria-label={`Quitar la etiqueta ${tag}`}
+                  className="flex h-4 w-4 items-center justify-center rounded-full leading-none text-accent-subtle-text/70 transition hover:bg-black/10 hover:text-accent-subtle-text dark:hover:bg-white/10"
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Descripción / notas */}
       <textarea

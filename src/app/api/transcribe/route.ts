@@ -16,7 +16,10 @@ import { resolveTranscribeMode, resolveTranslationLanguage, translationLanguageL
 import { translateText } from "@/lib/translate/groq";
 import { listVocabularyTerms } from "@/lib/vocabulary/store";
 import { correctTextWithVocabulary } from "@/lib/vocabulary/groq";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { generateTitleAndTags } from "@/lib/titleTags/groq";
+import { canGenerateTitleTags, isPlaceholderTitle } from "@/lib/titleTags/validate";
+import { isAiTitleTagsDailyLimitError } from "@/lib/aiUsage";
+import { isMissingColumnError, isMissingTableError } from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -68,6 +71,16 @@ export async function POST(req: NextRequest) {
   }
 
   const audioName = file.name || "audio";
+
+  // El título opcional que manda el cliente (ej. el que la usuaria editó/dejó en la cola de
+  // TranscribeWorkspace) se lee ACÁ arriba — antes vivía junto al insert (paso 4), pero el paso 2.7
+  // (auto-título) más abajo necesita decidir si este título es "mecánico" (nombre de archivo/
+  // grabación por defecto, ver `isPlaceholderTitle`) ANTES de armar la fila a insertar. Columna
+  // `title` es NOT NULL DEFAULT '' (ver migración transcription_title): si no viene título,
+  // guardamos "" (no null) — la UI ya usa `audio_name` como fallback visual cuando `title` está
+  // vacío (ver placeholder en TranscriptionDetail).
+  const titleRaw = (form.get("title") as string) || "";
+  const title = titleRaw.trim().slice(0, 120);
 
   // 1.4) Límite diario de transcripciones por usuario.
   //      Se cuentan también las transcripciones soft-deleted: el usuario ya consumió cuota
@@ -301,63 +314,146 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3) Subir el audio a Storage (bucket privado, carpeta del usuario). Best-effort:
-  //    si falla la subida, igual guardamos el texto (sin audio).
+  // 2.7) Auto-título + auto-tags Y 3) Subir el audio a Storage — EN PARALELO (no secuencial, fix del
+  //      review adversarial de esta misma tanda). Los dos pasos son independientes entre sí (título/
+  //      tags solo necesita `finalText`/`translatedTo`/`language`; la subida solo necesita `file`/
+  //      `audioName`) y cada uno best-effort por separado — ninguno puede rechazar la promesa que
+  //      Promise.all espera (cada uno tiene su propio try/catch interno que nunca re-lanza, ver
+  //      abajo). Encadenarlos secuencialmente sumaba hasta 8s más (el timeout de título/tags) DESPUÉS
+  //      de transcribir+traducir+corregir vocabulario y ANTES de guardar — acercando el request al
+  //      techo de `maxDuration = 60` más de lo necesario, justo el riesgo que la regla de oro de 2.7
+  //      (nunca demorar la transcripción) existe para evitar.
+  let autoTags: string[] = [];
+  let autoTitle: string | null = null;
   let audioPath: string | null = null;
-  try {
-    const ext = audioExtension(audioName);
-    const path = buildAudioObjectPath(user.id, randomUUID(), ext);
-    // Reintenta ante fallas transitorias (red, timeouts) con backoff: 3 intentos totales.
-    // Mismo path en cada intento — es seguro porque `upsert: false` y el intento previo
-    // falló, así que el objeto nunca llegó a crearse.
-    const { error: upErr, attempts } = await uploadWithRetry(() =>
-      supabase.storage.from(AUDIO_BUCKET).upload(path, file, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false,
-      })
-    );
-    if (!upErr) {
-      audioPath = path;
-    } else {
-      // Best-effort: no bloqueamos la respuesta, pero esto NO puede desaparecer en
-      // silencio — sin este log era imposible saber por qué un audio se perdía
-      // (bucket inexistente, RLS, etc.) sin entrar al dashboard de Supabase.
-      console.error("[transcribe] audio upload failed", {
-        path,
-        userId: user.id,
-        error: upErr.message,
-        name: upErr.name,
-        attempts,
-      });
-      Sentry.captureException(upErr, {
-        extra: { path, userId: user.id, stage: "audio-upload", attempts },
-      });
-    }
-  } catch (err) {
-    // Llegar acá significa que `uploadWithRetry` agotó los UPLOAD_MAX_ATTEMPTS intentos y el
-    // último también lanzó una excepción (no un `error` devuelto por el SDK).
-    console.error("[transcribe] audio upload threw", err, { attempts: UPLOAD_MAX_ATTEMPTS });
-    Sentry.captureException(err, {
-      extra: { userId: user.id, stage: "audio-upload", attempts: UPLOAD_MAX_ATTEMPTS },
-    });
-  }
 
-  // 4) Guardar la transcripción. Acepta un proyecto destino y un título opcionales (el título lo
-  //    manda, por ejemplo, el modal de "Guardar grabación" en TranscribeWorkspace; si no viene,
-  //    la transcripción queda sin título propio, igual que hoy — la UI usa `audio_name` como
-  //    fallback visual hasta que el usuario lo edite desde el detalle).
+  await Promise.all([
+    // 2.7) Auto-título + auto-tags (tanda 3 de quick wins, ver ROADMAP.md): UNA sola llamada al LLM
+    //      barato (mismo modelo que resumen/traducción/vocabulario) genera, a partir de `finalText`
+    //      (el texto YA traducido/corregido — el título/tags deben describir lo que la usuaria
+    //      realmente va a leer), un título corto + 3-5 tags de tema. Mata el problema de notas
+    //      indistinguibles ("Grabación 47").
+    //
+    //      REGLA DE ORO (best-effort ESTRICTO, más estricto incluso que traducción/vocabulario): esto
+    //      corre DESPUÉS de que Whisper ya transcribió (el trabajo caro/pagado) — si esta llamada
+    //      falla, tarda de más, o se pasa del cap, la transcripción se guarda IGUAL, sin título/tags.
+    //      Dos capas independientes garantizan esto: `generateTitleAndTags` está documentada para
+    //      nunca lanzar (siempre `{ ok: false }` ante cualquier falla, ver `src/lib/titleTags/groq.ts`)
+    //      Y todo este paso vive en su propio try/catch, igual que traducción/vocabulario arriba —
+    //      ningún error de este bloque puede propagarse y tirar abajo el resto del request.
+    //
+    //      Cap de costo: mismo patrón reserve-on-attempt + trigger atómico que `/api/summarize`
+    //      (`kind: "title_tags"` en `ai_usage_log`, ver `20260711160000_transcription_tags.sql`) —
+    //      pero a diferencia de `/api/summarize` (endpoint DEDICADO a la acción cacheada, fail-CLOSED
+    //      con 503/429 ante cualquier problema del cap), acá CUALQUIER resultado del insert que no sea
+    //      éxito significa "no generamos esta vez" y se sigue de largo: el propósito de este request
+    //      es la transcripción, título/tags es un extra, nunca al revés.
+    (async () => {
+      if (!canGenerateTitleTags(finalText)) return;
+      try {
+        const { error: usageLogErr } = await supabase
+          .from("ai_usage_log")
+          .insert({ user_id: user.id, kind: "title_tags", forced: false });
+
+        if (!usageLogErr) {
+          // Idioma del título/tags: mismo criterio que el resumen (`/api/summarize`) — el idioma del
+          // texto FINAL (traducido si aplica, o el mismo idioma del texto si es "auto").
+          const languageLabel = translatedTo
+            ? translationLanguageLabel(translatedTo)
+            : language && language !== "auto"
+              ? translationLanguageLabel(language)
+              : null;
+
+          const result = await generateTitleAndTags(finalText, languageLabel, apiKey);
+          if (result.ok) {
+            autoTags = result.result.tags;
+            // El auto-título SOLO pisa un título mecánico (nombre de archivo/grabación por defecto)
+            // — NUNCA uno que la usuaria haya escrito a mano (ver `isPlaceholderTitle`).
+            if (isPlaceholderTitle(title, audioName)) {
+              autoTitle = result.result.title;
+            }
+          } else {
+            console.error("[transcribe] title/tags generation failed", { userId: user.id, error: result.error });
+            Sentry.captureException(new Error(result.error), {
+              extra: { userId: user.id, stage: "title-tags" },
+            });
+          }
+        } else if (!isAiTitleTagsDailyLimitError(usageLogErr) && !isMissingTableError(usageLogErr)) {
+          // Cualquier error que NO sea el cap funcionando como corresponde (límite alcanzado) ni la
+          // ventana de rollout de la migración (tabla/trigger sin aplicar todavía) es inesperado —
+          // se reporta, pero SIGUE sin título/tags, nunca bloquea.
+          console.error("[transcribe] title/tags usage log insert failed", {
+            userId: user.id,
+            error: usageLogErr.message,
+          });
+          Sentry.captureException(usageLogErr, {
+            extra: { userId: user.id, stage: "title-tags-usage-log-insert" },
+          });
+        }
+      } catch (err) {
+        // Defensa en profundidad — `generateTitleAndTags` está documentada para nunca lanzar, mismo
+        // criterio que el try/catch extra alrededor de `translateText`/`correctTextWithVocabulary`.
+        console.error("[transcribe] title/tags step threw", err);
+        Sentry.captureException(err, { extra: { userId: user.id, stage: "title-tags" } });
+      }
+    })(),
+
+    // 3) Subir el audio a Storage (bucket privado, carpeta del usuario). Best-effort:
+    //    si falla la subida, igual guardamos el texto (sin audio).
+    (async () => {
+      try {
+        const ext = audioExtension(audioName);
+        const path = buildAudioObjectPath(user.id, randomUUID(), ext);
+        // Reintenta ante fallas transitorias (red, timeouts) con backoff: 3 intentos totales.
+        // Mismo path en cada intento — es seguro porque `upsert: false` y el intento previo
+        // falló, así que el objeto nunca llegó a crearse.
+        const { error: upErr, attempts } = await uploadWithRetry(() =>
+          supabase.storage.from(AUDIO_BUCKET).upload(path, file, {
+            contentType: file.type || "application/octet-stream",
+            upsert: false,
+          })
+        );
+        if (!upErr) {
+          audioPath = path;
+        } else {
+          // Best-effort: no bloqueamos la respuesta, pero esto NO puede desaparecer en
+          // silencio — sin este log era imposible saber por qué un audio se perdía
+          // (bucket inexistente, RLS, etc.) sin entrar al dashboard de Supabase.
+          console.error("[transcribe] audio upload failed", {
+            path,
+            userId: user.id,
+            error: upErr.message,
+            name: upErr.name,
+            attempts,
+          });
+          Sentry.captureException(upErr, {
+            extra: { path, userId: user.id, stage: "audio-upload", attempts },
+          });
+        }
+      } catch (err) {
+        // Llegar acá significa que `uploadWithRetry` agotó los UPLOAD_MAX_ATTEMPTS intentos y el
+        // último también lanzó una excepción (no un `error` devuelto por el SDK).
+        console.error("[transcribe] audio upload threw", err, { attempts: UPLOAD_MAX_ATTEMPTS });
+        Sentry.captureException(err, {
+          extra: { userId: user.id, stage: "audio-upload", attempts: UPLOAD_MAX_ATTEMPTS },
+        });
+      }
+    })(),
+  ]);
+
+  // 4) Guardar la transcripción. Acepta un proyecto destino opcional (el título ya se leyó más
+  //    arriba, ver comentario junto a `audioName` — lo necesitaba el paso 2.7 de auto-título).
+  //    `finalTitle` es el generado automáticamente (si el paso 2.7 corrió Y el título original era
+  //    mecánico) o, si no, el título tal cual llegó del cliente — nunca pisa un título que la
+  //    usuaria haya escrito a mano.
   const projectId = (form.get("projectId") as string) || null;
-  const titleRaw = (form.get("title") as string) || "";
-  // Columna `title` es NOT NULL DEFAULT '' (ver migración transcription_title): si no viene
-  // título, guardamos "" (no null) — la UI ya usa `audio_name` como fallback visual cuando
-  // `title` está vacío (ver placeholder en TranscriptionDetail).
-  const title = titleRaw.trim().slice(0, 120);
+  const finalTitle = autoTitle ?? title;
   let savedId: string | null = null;
   try {
     const baseRow = {
       user_id: user.id,
       project_id: projectId,
-      title,
+      title: finalTitle,
       audio_name: audioName,
       audio_size: file.size,
       audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
@@ -365,22 +461,23 @@ export async function POST(req: NextRequest) {
       language,
       model,
     };
-    // `translated_to`/`original_text` (Fase F4, ver supabase/migrations/20260709210000_translation.sql)
-    // y `vocabulary_corrected` (feature de vocabulario custom, ver
-    // supabase/migrations/20260710120000_user_vocabulary.sql) se aplican automático recién al
+    // `translated_to`/`original_text` (Fase F4, ver supabase/migrations/20260709210000_translation.sql),
+    // `vocabulary_corrected` (feature de vocabulario custom, ver
+    // supabase/migrations/20260710120000_user_vocabulary.sql) y `tags` (tanda 3 de quick wins, ver
+    // supabase/migrations/20260711160000_transcription_tags.sql) se aplican automático recién al
     // mergear a `main` (mismo criterio que `projects.color` en F2) — en el preview de esta branch
-    // pueden no existir todavía, e INDEPENDIENTEMENTE una de otra (F4 puede estar aplicada y
+    // pueden no existir todavía, e INDEPENDIENTEMENTE unas de otras (F4 puede estar aplicada y
     // vocabulario no, es el caso más común en el día a día). Se intenta con TODAS las columnas
-    // nuevas primero y, ante un 42703 (columna inexistente), se cae en cascada: primero sin
-    // `vocabulary_corrected`, después sin ninguna de las tres. En cualquier nivel, el texto final
-    // (traducido y/o corregido) SIGUE llegando al usuario en la respuesta de este request
-    // (`finalText`), solo no queda etiquetado en la fila hasta que la migración correspondiente esté
-    // aplicada. A diferencia de `projects.color` en F2 (que usa el cache compartido de
-    // `schema-compat.ts` con TTL porque tiene muchos call-sites), acá se detecta por intento directo
-    // sin cache: la ventana de "migración sin aplicar" es corta y de bajo tráfico. OJO: hay OTRO
-    // retry de compat en el read-path del detalle (`app/t/[id]/page.tsx`) y en el dedupe de más
-    // arriba — todos independientes y sin cache a propósito; si esto se volviera caliente, valdría
-    // unificarlos en un cache compartido como F2.
+    // nuevas primero y, ante un 42703 (columna inexistente), se cae en cascada, MÁS NUEVA primero:
+    // sin `tags`, después sin `vocabulary_corrected` tampoco, después sin ninguna de las cuatro. En
+    // cualquier nivel, el texto final (traducido y/o corregido) SIGUE llegando al usuario en la
+    // respuesta de este request (`finalText`), solo no queda etiquetado en la fila hasta que la
+    // migración correspondiente esté aplicada. A diferencia de `projects.color` en F2 (que usa el
+    // cache compartido de `schema-compat.ts` con TTL porque tiene muchos call-sites), acá se detecta
+    // por intento directo sin cache: la ventana de "migración sin aplicar" es corta y de bajo
+    // tráfico. OJO: hay OTRO retry de compat en el read-path del detalle (`app/t/[id]/page.tsx`), en
+    // el dashboard (`app/page.tsx`) y en el dedupe de más arriba — todos independientes y sin cache a
+    // propósito; si esto se volviera caliente, valdría unificarlos en un cache compartido como F2.
     let insertResult = await supabase
       .from("transcriptions")
       .insert({
@@ -388,9 +485,23 @@ export async function POST(req: NextRequest) {
         translated_to: translatedTo,
         original_text: originalText,
         vocabulary_corrected: vocabularyCorrected,
+        tags: autoTags,
       })
       .select("id")
       .single();
+
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      insertResult = await supabase
+        .from("transcriptions")
+        .insert({
+          ...baseRow,
+          translated_to: translatedTo,
+          original_text: originalText,
+          vocabulary_corrected: vocabularyCorrected,
+        })
+        .select("id")
+        .single();
+    }
 
     if (insertResult.error && isMissingColumnError(insertResult.error)) {
       insertResult = await supabase

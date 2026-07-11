@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeTagFilter } from "@/lib/tags";
 import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { buildProjectBreadcrumb, buildProjectTree, getSubfolders, rollUpProjectCounts } from "@/lib/drive/tree";
@@ -30,6 +31,9 @@ type Transcription = {
   icon: string;
   created_at: string;
   project_id: string | null;
+  // Tags de tema (tanda 3 de quick wins, ver ROADMAP.md) — siempre un array (nunca
+  // undefined/null: `fetchTranscriptionsCompat` degrada a `[]` durante la ventana de rollout).
+  tags: string[];
 };
 
 type Project = {
@@ -127,17 +131,67 @@ function normalizeProjectRows(rows: unknown, driveAvailable: boolean, colorAvail
   });
 }
 
+const BASE_TRANSCRIPTION_COLUMNS = "id, title, audio_name, text, icon, created_at, project_id";
+
+/**
+ * Trae la lista de transcripciones del nivel actual (proyecto/carpeta o "Todas"/"Sin proyecto"), con
+ * soporte opcional de filtro por tag (`?tag=`, tanda 3 de quick wins — ver `normalizeTagFilter` en
+ * `src/lib/tags.ts`). `tags` (`supabase/migrations/20260711160000_transcription_tags.sql`) es la
+ * columna MÁS NUEVA de esta query — mismo criterio de compat que `fetchProjectsCompat`: si todavía
+ * no existe (`42703`, ventana de rollout), se degrada a `tags: []` en cada fila y el filtro por tag
+ * queda inerte (no hay nada contra qué filtrar) en vez de romper el dashboard entero.
+ *
+ * Scoping por usuario: lo resuelve RLS (policy "own transcriptions", mismo criterio que el resto de
+ * las queries de `transcriptions` en esta app, ver `/api/summarize`) — el filtro por tag se aplica
+ * DENTRO de esa misma query ya scopeada al dueño, nunca se abre una consulta sin RLS para esto (sin
+ * eso, un tag ajeno nunca podría filtrar notas de otro usuario, pero tampoco hace falta un chequeo
+ * manual: RLS ya lo garantiza a nivel de fila).
+ */
+async function fetchTranscriptionsCompat(
+  supabase: SupabaseClient,
+  filter: string | undefined,
+  tagFilter: string | null
+): Promise<Transcription[]> {
+  const runQuery = (columns: string, applyTagFilter: boolean) => {
+    let q = supabase
+      .from("transcriptions")
+      .select(columns)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (filter === "none") q = q.is("project_id", null);
+    else if (filter) q = q.eq("project_id", filter);
+    if (applyTagFilter && tagFilter) q = q.contains("tags", [tagFilter]);
+    return q;
+  };
+
+  // `columns` es un parámetro (`string` genérico, no un literal) — igual que `runQuery` en
+  // `fetchProjectsCompat`, el cliente tipado de Supabase no puede resolver el shape en tiempo de
+  // compilación a partir de un string dinámico y devuelve `GenericStringError`. Se castea vía
+  // `unknown` (mismo escape hatch que `normalizeProjectRows`, ahí a través de un parámetro
+  // `rows: unknown` separado) — la forma REAL la garantiza `columns`, elegido a mano en este mismo
+  // archivo, no input externo.
+  const { data, error } = await runQuery(`${BASE_TRANSCRIPTION_COLUMNS}, tags`, true);
+  if (!error) return (data ?? []) as unknown as Transcription[];
+  if (!isMissingColumnError(error)) return [];
+
+  const fallback = await runQuery(BASE_TRANSCRIPTION_COLUMNS, false);
+  return ((fallback.data ?? []) as unknown as Omit<Transcription, "tags">[]).map((t) => ({ ...t, tags: [] }));
+}
+
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ project?: string }>;
+  searchParams: Promise<{ project?: string; tag?: string }>;
 }) {
-  const { project: filter } = await searchParams;
+  const { project: filter, tag: tagParam } = await searchParams;
+  const tagFilter = normalizeTagFilter(tagParam);
   const supabase = await createClient();
 
-  const [projects, { data: countRows }] = await Promise.all([
+  const [projects, { data: countRows }, items] = await Promise.all([
     fetchProjectsCompat(supabase),
     supabase.from("transcriptions").select("project_id").is("deleted_at", null),
+    fetchTranscriptionsCompat(supabase, filter, tagFilter),
   ]);
 
   // Conteos por proyecto + "sin proyecto" + total.
@@ -168,19 +222,8 @@ export default async function Dashboard({
   const countsByProjectId = rollUpProjectCounts(projectTree, Object.fromEntries(counts)); // Map no es serializable al pasarlo a un Client Component
 
   // Lista filtrada: transcripciones DIRECTAS de este nivel (ni recursivo hacia subcarpetas, ni
-  // hacia arriba) — mismo criterio que ya usaba esta query antes del explorador, y es justo lo
-  // que necesita el panel "estilo Windows" (archivos de la carpeta actual, no de sus hijas).
-  let query = supabase
-    .from("transcriptions")
-    .select("id, title, audio_name, text, icon, created_at, project_id")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (filter === "none") query = query.is("project_id", null);
-  else if (filter) query = query.eq("project_id", filter);
-  const { data: listData } = await query;
-  const items = (listData ?? []) as Transcription[];
-
+  // hacia arriba), con filtro por tag opcional — `items` ya se resolvió arriba, en el mismo
+  // `Promise.all` (`fetchTranscriptionsCompat`).
   const activeProject = filter && filter !== "none" ? projectsFull.find((p) => p.id === filter) : null;
   const heading =
     filter === "none" ? "Sin proyecto" : activeProject ? activeProject.name : "Todas las transcripciones";
@@ -230,6 +273,22 @@ export default async function Dashboard({
       {/* Panel principal: explorador jerárquico (proyecto/carpeta seleccionado) o lista plana
           ("Todas" / "Sin proyecto", comportamiento sin cambios). */}
       <main className="min-w-0">
+        {/* Filtro por tag activo (tanda 3 de quick wins, ver ROADMAP.md) — se combina con el
+            proyecto/carpeta actual si hay uno (la query de `items` ya aplica ambos), "Quitar
+            filtro" vuelve a la misma vista de proyecto pero sin el tag. */}
+        {tagFilter && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm">
+            <span className="text-secondary">
+              Filtrando por etiqueta: <span className="font-semibold text-foreground">{tagFilter}</span>
+            </span>
+            <Link
+              href={filter ? `/app?project=${filter}` : "/app"}
+              className="ml-auto text-xs font-semibold text-accent hover:underline"
+            >
+              Quitar filtro
+            </Link>
+          </div>
+        )}
         {activeProject ? (
           <>
             <Breadcrumb chain={breadcrumbChain} />

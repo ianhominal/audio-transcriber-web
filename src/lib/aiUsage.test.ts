@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isAiSummaryDailyLimitError, isAiSummaryForceLimitError, isAiChatDailyLimitError } from "./aiUsage";
+import {
+  isAiSummaryDailyLimitError,
+  isAiSummaryForceLimitError,
+  isAiChatDailyLimitError,
+  isAiTitleTagsDailyLimitError,
+} from "./aiUsage";
 
 describe("isAiSummaryDailyLimitError / isAiSummaryForceLimitError", () => {
   it("detecta el token del límite diario en el mensaje del trigger", () => {
@@ -50,5 +55,30 @@ describe("isAiChatDailyLimitError", () => {
     expect(isAiChatDailyLimitError(undefined)).toBe(false);
     expect(isAiChatDailyLimitError({})).toBe(false);
     expect(isAiChatDailyLimitError({ message: 42 })).toBe(false);
+  });
+});
+
+describe("isAiTitleTagsDailyLimitError", () => {
+  it("detecta el token del límite diario de título+tags en el mensaje del trigger", () => {
+    expect(isAiTitleTagsDailyLimitError({ message: "ai_title_tags_daily_limit_reached" })).toBe(true);
+    expect(
+      isAiTitleTagsDailyLimitError({ message: "error: ai_title_tags_daily_limit_reached (PL/pgSQL function ...)" })
+    ).toBe(true);
+  });
+
+  it("NO confunde el token de título+tags con los de resumen/chat y viceversa", () => {
+    expect(isAiTitleTagsDailyLimitError({ message: "ai_summary_daily_limit_reached" })).toBe(false);
+    expect(isAiTitleTagsDailyLimitError({ message: "ai_summary_force_daily_limit_reached" })).toBe(false);
+    expect(isAiTitleTagsDailyLimitError({ message: "ai_chat_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryDailyLimitError({ message: "ai_title_tags_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryForceLimitError({ message: "ai_title_tags_daily_limit_reached" })).toBe(false);
+    expect(isAiChatDailyLimitError({ message: "ai_title_tags_daily_limit_reached" })).toBe(false);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isAiTitleTagsDailyLimitError(null)).toBe(false);
+    expect(isAiTitleTagsDailyLimitError(undefined)).toBe(false);
+    expect(isAiTitleTagsDailyLimitError({})).toBe(false);
+    expect(isAiTitleTagsDailyLimitError({ message: 42 })).toBe(false);
   });
 });

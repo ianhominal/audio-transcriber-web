@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { validateProjectName } from "@/lib/format";
+import { sanitizeTags } from "@/lib/tags";
 import { collectProjectSubtreeIds, type ProjectParentLink } from "@/lib/drive/tree";
 import { resolveProjectColorId } from "@/lib/project-colors";
 import {
@@ -339,6 +340,29 @@ export async function updateTranscriptionTitle(id: string, title: string): Promi
     .update({ title: title.trim().slice(0, 120) })
     .eq("id", id);
   if (error) return { ok: false, error: "No se pudo guardar el título." };
+
+  revalidatePath(`/app/t/${id}`);
+  revalidatePath("/app");
+  return { ok: true };
+}
+
+/**
+ * Reemplaza la lista completa de tags de una transcripción (tanda 3 de quick wins, ver ROADMAP.md).
+ * Hoy usado solo para QUITAR un tag desde el detalle (chip "×", ver `removeTag` en
+ * `transcription-detail.tsx`) con guardado inmediato — no pasa por el flujo `dirty`/"Guardar" de
+ * título/texto/descripción/ícono. Deliberadamente genérica (recibe el array completo, no un solo
+ * tag a agregar/quitar): deja el modelo listo para un alta manual de tags a futuro sin tocar el
+ * backend (ver ROADMAP.md), aunque esta tanda no construye esa UI. Sanea con `sanitizeTags` (mismo
+ * criterio que la generación automática: minúscula, dedupe, cap) — defensa en profundidad más allá
+ * de lo que ya valida el cliente.
+ */
+export async function updateTranscriptionTags(id: string, tags: string[]): Promise<ActionResult> {
+  const { supabase } = await requireUser();
+  const { error } = await supabase
+    .from("transcriptions")
+    .update({ tags: sanitizeTags(tags) })
+    .eq("id", id);
+  if (error) return { ok: false, error: "No se pudieron actualizar las etiquetas." };
 
   revalidatePath(`/app/t/${id}`);
   revalidatePath("/app");

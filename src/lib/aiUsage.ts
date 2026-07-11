@@ -44,6 +44,21 @@ export const SUMMARY_FORCE_DAILY_LIMIT = 20;
  */
 export const CHAT_DAILY_LIMIT = 60;
 
+/**
+ * Tope de generaciones de título+tags (llamadas reales a Groq) por usuario/día — tercer trigger
+ * `BEFORE INSERT` independiente sobre `ai_usage_log` (`kind = 'title_tags'`, ver migración
+ * `20260711160000_transcription_tags.sql`). A diferencia del resumen (a pedido manual, con un cache
+ * que absorbe la mayoría de los pedidos), este paso corre AUTOMÁTICO en cada transcripción (ver
+ * `src/lib/titleTags/groq.ts` y el paso 2.7 de `/api/transcribe`) — por eso el número es más
+ * generoso que `SUMMARY_DAILY_LIMIT` y se acerca más al orden de magnitud de `DAILY_LIMIT`
+ * (transcripciones/día, `src/lib/rateLimit.ts`): pensado para no ser, en la práctica, un límite real
+ * del uso normal de una sola cuenta, solo la red de seguridad de costo/abuso. Un rechazo acá NUNCA
+ * es un bug — el caller lo trata igual que cualquier otra falla best-effort de este paso: se salta
+ * la generación y la transcripción se guarda igual. DEBE coincidir con el número hardcodeado en el
+ * trigger `enforce_ai_usage_title_tags_limit`.
+ */
+export const TITLE_TAGS_DAILY_LIMIT = 100;
+
 // Tokens estables que raise-ea el trigger BEFORE INSERT (ver migración). Se detectan por substring
 // en el mensaje del error de PostgREST — mismo mecanismo que `isTermLimitError` en
 // `src/lib/vocabulary/store.ts`, elegido a propósito para no depender del SQLSTATE (que PostgREST no
@@ -51,6 +66,7 @@ export const CHAT_DAILY_LIMIT = 60;
 const SUMMARY_DAILY_LIMIT_TOKEN = "ai_summary_daily_limit_reached";
 const SUMMARY_FORCE_LIMIT_TOKEN = "ai_summary_force_daily_limit_reached";
 const CHAT_DAILY_LIMIT_TOKEN = "ai_chat_daily_limit_reached";
+const TITLE_TAGS_DAILY_LIMIT_TOKEN = "ai_title_tags_daily_limit_reached";
 
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite DIARIO total. */
 export function isAiSummaryDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
@@ -65,4 +81,10 @@ export function isAiSummaryForceLimitError(error: { message?: unknown } | null |
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite diario de CHAT. */
 export function isAiChatDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
   return !!error && typeof error.message === "string" && error.message.includes(CHAT_DAILY_LIMIT_TOKEN);
+}
+
+/** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite diario de
+ * TÍTULO+TAGS (`kind: "title_tags"`, ver paso 2.7 de `/api/transcribe`). */
+export function isAiTitleTagsDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
+  return !!error && typeof error.message === "string" && error.message.includes(TITLE_TAGS_DAILY_LIMIT_TOKEN);
 }

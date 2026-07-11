@@ -26,6 +26,8 @@ type Transcription = {
   icon: string;
   created_at: string;
   project_id: string | null;
+  // Tags de tema (tanda 3 de quick wins, ver ROADMAP.md) — siempre un array.
+  tags: string[];
 };
 type Project = { id: string; name: string; icon: string };
 
@@ -139,18 +141,38 @@ export function TranscriptionRow({
         busy ? "opacity-50" : ""
       } ${dragging ? "opacity-40" : ""}`}
     >
-      <Link href={`/app/t/${transcription.id}`} draggable={false} className="block min-w-0 flex-1 p-4">
-        <div className="flex items-baseline justify-between gap-4">
-          <p className="truncate font-semibold text-foreground">
-            <span className="mr-1.5">{transcription.icon || "📄"}</span>
-            {displayName}
+      <div className="min-w-0 flex-1 p-4">
+        {/* Nota: el título/preview van en su PROPIO <Link> (no todo el bloque) porque los chips de
+            tags de abajo son links a su vez — un <a> anidado dentro de otro es HTML inválido. */}
+        <Link href={`/app/t/${transcription.id}`} draggable={false} className="block">
+          <div className="flex items-baseline justify-between gap-4">
+            <p className="truncate font-semibold text-foreground">
+              <span className="mr-1.5">{transcription.icon || "📄"}</span>
+              {displayName}
+            </p>
+            <span className="shrink-0 text-xs text-tertiary">{formatDate(transcription.created_at)}</span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-sm text-secondary">
+            {transcription.text || "(sin texto)"}
           </p>
-          <span className="shrink-0 text-xs text-tertiary">{formatDate(transcription.created_at)}</span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-sm text-secondary">
-          {transcription.text || "(sin texto)"}
-        </p>
-      </Link>
+        </Link>
+        {transcription.tags.length > 0 && (
+          <ul aria-label="Etiquetas" role="list" className="mt-2 flex flex-wrap gap-1.5">
+            {transcription.tags.map((tag) => (
+              <li key={tag}>
+                <Link
+                  href={`/app?tag=${encodeURIComponent(tag)}`}
+                  draggable={false}
+                  aria-label={`Filtrar por la etiqueta ${tag}`}
+                  className="inline-flex items-center rounded-full bg-accent-subtle px-2.5 py-0.5 text-xs font-medium text-accent-subtle-text transition hover:opacity-80"
+                >
+                  {tag}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div ref={menuContainerRef} className="flex items-start p-2">
         <IconMenu label="Opciones de la transcripción">
           {(close) => (
