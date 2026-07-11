@@ -51,3 +51,4 @@ next-env.d.ts
 # Documentación interna / contexto de desarrollo (no público)
 .claude/
 CLAUDE.md
+.engram/
