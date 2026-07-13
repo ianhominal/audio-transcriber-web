@@ -13,6 +13,7 @@ import {
   normalizeQueueTitle,
   resolveQueueTitle,
 } from "@/lib/format";
+import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
@@ -33,27 +34,9 @@ const SUPPORTED = [
   ".mpeg", ".mpga", ".flac", ".webm",
 ];
 
-// Límite de payload de Vercel (~4.5 MB). Los audios más grandes se derivan a la app de escritorio.
-const WEB_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
-
-// Candidatos de mimeType para MediaRecorder, en orden de preferencia (el navegador soporta un subconjunto).
-const AUDIO_MIME_CANDIDATES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/ogg;codecs=opus",
-  "audio/ogg",
-];
-
-/** Elige el primer mimeType soportado por MediaRecorder en este navegador. */
-function pickSupportedMimeType(candidates: string[]): string | undefined {
-  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return undefined;
-  return candidates.find((type) => MediaRecorder.isTypeSupported(type));
-}
-
-/** Extensión de archivo acorde al mimeType grabado (webm u ogg). */
-function extensionForMimeType(mimeType: string): string {
-  return mimeType.includes("ogg") ? "ogg" : "webm";
-}
+// WEB_MAX_BYTES, AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType ahora viven en
+// @/lib/recording — se comparten con `/app/capturar` (ver `capture-workspace.tsx`), que necesita
+// exactamente la misma lógica de compat de MediaRecorder para su propio flujo de grabación.
 
 type Project = { id: string; name: string; icon: string };
 type Status = "pending" | "working" | "done" | "duplicate" | "error";
