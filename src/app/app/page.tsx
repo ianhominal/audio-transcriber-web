@@ -21,6 +21,7 @@ import { NewProjectButton } from "./new-project-button";
 import { NewSubfolderButton } from "./new-subfolder-button";
 import { ProjectHeader } from "./project-header";
 import { ProjectTree } from "./project-tree";
+import { OnboardingWelcome } from "@/components/app/onboarding-welcome";
 import { ResurfaceCard } from "./resurface-card";
 import { SearchBar } from "./search-bar";
 import { SubfolderCard } from "./subfolder-card";
@@ -244,6 +245,15 @@ export default async function Dashboard({
   }
   const total = (countRows ?? []).length;
 
+  // First-time-user signal for the onboarding welcome: zero notes in the WHOLE account (not just
+  // this filter/tag's `items`) AND no filter/tag active — a brand-new account browsing "Todas"
+  // with nothing yet, not a filtered view that merely has no matches. Only gates whether
+  // `<OnboardingWelcome>` is even mounted (never on a filtered/tagged view); the "seen" half of
+  // the decision is client-only (localStorage), so `shouldShowOnboarding` — the real combined
+  // source of truth — is called INSIDE the component with `hasAnyNotes` passed through as a prop.
+  // See `src/components/app/onboarding-welcome.tsx` / `src/lib/onboarding.ts`.
+  const isFirstTimeCandidate = !filter && !tagFilter && total === 0;
+
   // Lista de proyectos con campos en camelCase (jerarquía Drive-sync v2) armada UNA vez acá:
   // sirve para <ProjectTree> (sidebar), para el roll-up de conteos (`rollUpProjectCounts`, un
   // proyecto padre muestra el total INCLUYENDO a sus descendientes) y para el EXPLORADOR
@@ -414,6 +424,9 @@ export default async function Dashboard({
           </>
         ) : (
           <>
+            {isFirstTimeCandidate && (
+              <OnboardingWelcome hasAnyNotes={total > 0} recordHref="/app/capturar" uploadHref={newHref} />
+            )}
             <ResurfaceCard candidates={resurfaceCandidates} />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
