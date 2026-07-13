@@ -5,6 +5,8 @@ import {
   isAiChatDailyLimitError,
   isAiTitleTagsDailyLimitError,
   isAiRecipeDailyLimitError,
+  isAiMergeDailyLimitError,
+  isAiBrainDailyLimitError,
 } from "./aiUsage";
 
 describe("isAiSummaryDailyLimitError / isAiSummaryForceLimitError", () => {
@@ -108,5 +110,54 @@ describe("isAiRecipeDailyLimitError", () => {
     expect(isAiRecipeDailyLimitError(undefined)).toBe(false);
     expect(isAiRecipeDailyLimitError({})).toBe(false);
     expect(isAiRecipeDailyLimitError({ message: 42 })).toBe(false);
+  });
+});
+
+describe("isAiMergeDailyLimitError", () => {
+  it("detecta el token del límite diario de uniones en el mensaje del trigger", () => {
+    expect(isAiMergeDailyLimitError({ message: "ai_merge_daily_limit_reached" })).toBe(true);
+    expect(
+      isAiMergeDailyLimitError({ message: "error: ai_merge_daily_limit_reached (PL/pgSQL function ...)" })
+    ).toBe(true);
+  });
+
+  it("NO confunde el token de uniones con los demás y viceversa", () => {
+    expect(isAiMergeDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+    expect(isAiRecipeDailyLimitError({ message: "ai_merge_daily_limit_reached" })).toBe(false);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isAiMergeDailyLimitError(null)).toBe(false);
+    expect(isAiMergeDailyLimitError(undefined)).toBe(false);
+    expect(isAiMergeDailyLimitError({})).toBe(false);
+    expect(isAiMergeDailyLimitError({ message: 42 })).toBe(false);
+  });
+});
+
+describe("isAiBrainDailyLimitError", () => {
+  it("detecta el token del límite diario del Segundo cerebro en el mensaje del trigger", () => {
+    expect(isAiBrainDailyLimitError({ message: "ai_brain_daily_limit_reached" })).toBe(true);
+    expect(
+      isAiBrainDailyLimitError({ message: "error: ai_brain_daily_limit_reached (PL/pgSQL function ...)" })
+    ).toBe(true);
+  });
+
+  it("NO confunde el token del Segundo cerebro con los demás y viceversa (incluido 'merge', que comparte prefijo 'ai_')", () => {
+    expect(isAiBrainDailyLimitError({ message: "ai_summary_daily_limit_reached" })).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: "ai_summary_force_daily_limit_reached" })).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: "ai_chat_daily_limit_reached" })).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: "ai_title_tags_daily_limit_reached" })).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: "ai_merge_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryDailyLimitError({ message: "ai_brain_daily_limit_reached" })).toBe(false);
+    expect(isAiChatDailyLimitError({ message: "ai_brain_daily_limit_reached" })).toBe(false);
+    expect(isAiMergeDailyLimitError({ message: "ai_brain_daily_limit_reached" })).toBe(false);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isAiBrainDailyLimitError(null)).toBe(false);
+    expect(isAiBrainDailyLimitError(undefined)).toBe(false);
+    expect(isAiBrainDailyLimitError({})).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: 42 })).toBe(false);
   });
 });

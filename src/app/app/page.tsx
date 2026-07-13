@@ -22,6 +22,7 @@ import { NewSubfolderButton } from "./new-subfolder-button";
 import { ProjectHeader } from "./project-header";
 import { ProjectTree } from "./project-tree";
 import { ResurfaceCard } from "./resurface-card";
+import { SearchBar } from "./search-bar";
 import { SubfolderCard } from "./subfolder-card";
 import { TranscriptionRow } from "./transcription-row";
 import { UnassignedProjectLink } from "./unassigned-drop-link";
@@ -313,6 +314,10 @@ export default async function Dashboard({
       {/* Panel principal: explorador jerárquico (proyecto/carpeta seleccionado) o lista plana
           ("Todas" / "Sin proyecto", comportamiento sin cambios). */}
       <main className="min-w-0">
+        {/* Búsqueda full-text GLOBAL ("Segundo cerebro", ver ROADMAP.md) — a propósito por FUERA de
+            la navegación por proyecto/carpeta: busca en TODAS las notas del usuario sin importar
+            dónde esté parada, mismo criterio que el chat de `/app/brain`. */}
+        <SearchBar />
         {/* Filtro por tag activo (tanda 3 de quick wins, ver ROADMAP.md) — se combina con el
             proyecto/carpeta actual si hay uno (la query de `items` ya aplica ambos), "Quitar
             filtro" vuelve a la misma vista de proyecto pero sin el tag. */}
