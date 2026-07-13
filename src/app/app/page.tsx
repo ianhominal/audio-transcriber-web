@@ -6,6 +6,7 @@ import { RESURFACE_MIN_AGE_DAYS } from "@/lib/resurface";
 import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { buildProjectBreadcrumb, buildProjectTree, getSubfolders, rollUpProjectCounts } from "@/lib/drive/tree";
+import { MIN_MERGE_NOTES } from "@/lib/merge/validate";
 import {
   getProjectColorCompatSnapshot,
   getSchemaCompatSnapshot,
@@ -350,6 +351,18 @@ export default async function Dashboard({
               <Link href={newHref} className={buttonClasses({ size: "sm" })}>
                 🎙️ Nueva transcripción
               </Link>
+              {/* "Merge several notes into one document" (feature 2026-07-13): only makes sense with
+                  at least 2 DIRECT notes in this project/folder — same per-project navigation
+                  criteria (`?project=<id>`) as the rest of the dashboard, see
+                  `src/lib/merge/validate.ts` (MIN_MERGE_NOTES). */}
+              {items.length >= MIN_MERGE_NOTES && (
+                <Link
+                  href={`/app/merge?project=${activeProject.id}`}
+                  className={buttonClasses({ variant: "secondary", size: "sm" })}
+                >
+                  🧵 Unir en un documento
+                </Link>
+              )}
             </div>
 
             {subfolders.length === 0 && items.length === 0 ? (

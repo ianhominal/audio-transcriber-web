@@ -70,6 +70,16 @@ export const TITLE_TAGS_DAILY_LIMIT = 100;
  */
 export const AI_RECIPE_DAILY_LIMIT = 50;
 
+/**
+ * Cap on note merges (real calls to Groq, `kind: "merge"`) per user/day — fifth independent
+ * `BEFORE INSERT` trigger on `ai_usage_log` (see migration `20260713140000_ai_usage_merge.sql`,
+ * function `enforce_ai_usage_merge_limit`). Stricter than `AI_RECIPE_DAILY_LIMIT` (50): "merging
+ * notes" combines SEVERAL notes at once (up to `MAX_MERGE_INPUT_CHARS` = 40,000 chars of input, see
+ * `src/lib/merge/validate.ts`), a call that's more expensive on average than applying a format to a
+ * SINGLE note. MUST match the hardcoded number in the `enforce_ai_usage_merge_limit` trigger.
+ */
+export const AI_MERGE_DAILY_LIMIT = 20;
+
 // Tokens estables que raise-ea el trigger BEFORE INSERT (ver migración). Se detectan por substring
 // en el mensaje del error de PostgREST — mismo mecanismo que `isTermLimitError` en
 // `src/lib/vocabulary/store.ts`, elegido a propósito para no depender del SQLSTATE (que PostgREST no
@@ -79,6 +89,7 @@ const SUMMARY_FORCE_LIMIT_TOKEN = "ai_summary_force_daily_limit_reached";
 const CHAT_DAILY_LIMIT_TOKEN = "ai_chat_daily_limit_reached";
 const TITLE_TAGS_DAILY_LIMIT_TOKEN = "ai_title_tags_daily_limit_reached";
 const RECIPE_DAILY_LIMIT_TOKEN = "ai_recipe_daily_limit_reached";
+const MERGE_DAILY_LIMIT_TOKEN = "ai_merge_daily_limit_reached";
 
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite DIARIO total. */
 export function isAiSummaryDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
@@ -105,4 +116,10 @@ export function isAiTitleTagsDailyLimitError(error: { message?: unknown } | null
  * FORMATOS aplicados (`kind: "recipe"`, ver `/api/recipes/apply`). */
 export function isAiRecipeDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
   return !!error && typeof error.message === "string" && error.message.includes(RECIPE_DAILY_LIMIT_TOKEN);
+}
+
+/** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite diario de
+ * UNIONES de notas (`kind: "merge"`, ver `/api/notes/merge`). */
+export function isAiMergeDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
+  return !!error && typeof error.message === "string" && error.message.includes(MERGE_DAILY_LIMIT_TOKEN);
 }
