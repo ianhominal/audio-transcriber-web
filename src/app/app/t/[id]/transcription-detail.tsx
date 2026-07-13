@@ -117,6 +117,11 @@ export function TranscriptionDetail({
   const [justSaved, setJustSaved] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
+  // Export a .docx/.pdf (ver brief "Exportar Word/PDF" 2026-07-13): mismo criterio que
+  // `exportingDrive` — un booleano propio por formato, no un enum compartido, para no tocar el
+  // patrón ya usado por Drive.
+  const [exportingDocx, setExportingDocx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   // Fase F4: solo aplica a transcripciones traducidas (`translated_to`+`original_text` ambos
   // presentes) — arranca oculto, el texto principal (`text`) ya es el traducido.
   const [showOriginal, setShowOriginal] = useState(false);
@@ -476,6 +481,65 @@ export function TranscriptionDetail({
     URL.revokeObjectURL(url);
     setExportOpen(false);
     toast("Nota exportada.", "success");
+  }
+
+  /**
+   * Nota completa como .docx. Carga "docx" con un `import()` dinámico DENTRO del handler (no a
+   * nivel de módulo) para que Turbopack lo separe en su propio chunk que solo baja al hacer click
+   * acá — ver `docxExport.ts` para el motivo (nunca importar "docx" de forma estática en un archivo
+   * que pueda tocarse durante SSR).
+   */
+  async function exportDocx() {
+    setExportOpen(false);
+    setExportingDocx(true);
+    try {
+      const { exportNoteAsDocx } = await import("@/lib/docxExport");
+      const blob = await exportNoteAsDocx({
+        title: title || transcription.audio_name,
+        createdAt: transcription.created_at,
+        projectName,
+        text,
+        summary,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${slugifyFileName(title || transcription.audio_name)}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("Exportado como Word.", "success");
+    } catch {
+      toast("No se pudo exportar como Word.", "error");
+    } finally {
+      setExportingDocx(false);
+    }
+  }
+
+  /**
+   * Nota completa como .pdf. Mismo criterio que `exportDocx` de arriba (import dinámico de
+   * "jspdf" adentro del handler). `exportNoteAsPdf` devuelve la instancia de `jsPDF` en vez de un
+   * Blob: su propio método `.save()` ya arma la descarga (Blob + `<a>`) internamente, no hace falta
+   * repetir ese paso acá.
+   */
+  async function exportPdf() {
+    setExportOpen(false);
+    setExportingPdf(true);
+    try {
+      const { exportNoteAsPdf } = await import("@/lib/pdfExport");
+      const doc = await exportNoteAsPdf({
+        title: title || transcription.audio_name,
+        createdAt: transcription.created_at,
+        projectName,
+        text,
+        summary,
+      });
+      doc.save(`${slugifyFileName(title || transcription.audio_name)}.pdf`);
+      toast("Exportado como PDF.", "success");
+    } catch {
+      toast("No se pudo exportar como PDF.", "error");
+    } finally {
+      setExportingPdf(false);
+    }
   }
 
   async function exportDrive() {
@@ -922,6 +986,22 @@ export function TranscriptionDetail({
                   className="block w-full rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
                 >
                   🗒️ Nota completa (.md)
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportDocx}
+                  disabled={exportingDocx}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
+                >
+                  {exportingDocx ? <Spinner size="xs" /> : "📄"} {exportingDocx ? "Exportando…" : "Nota completa (.docx)"}
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportPdf}
+                  disabled={exportingPdf}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
+                >
+                  {exportingPdf ? <Spinner size="xs" /> : "🧾"} {exportingPdf ? "Exportando…" : "Nota completa (.pdf)"}
                 </button>
                 <button
                   role="menuitem"

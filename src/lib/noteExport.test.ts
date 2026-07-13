@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { summaryToMarkdown, buildNoteMarkdown, buildNotePlainText } from "./noteExport";
+import { summaryToMarkdown, buildNoteMarkdown, buildNotePlainText, buildNoteBlocks } from "./noteExport";
 import { formatDate } from "./format";
 import type { SummaryResult } from "./summary/format";
 
@@ -122,5 +122,83 @@ describe("buildNotePlainText", () => {
     expect(buildNotePlainText({ title: "", createdAt: CREATED_AT, text: "x", summary: null })).toContain(
       "Sin título"
     );
+  });
+});
+
+describe("buildNoteBlocks", () => {
+  it("el primer bloque siempre es el título", () => {
+    const blocks = buildNoteBlocks({ title: "Reunión de equipo", createdAt: CREATED_AT, text: "Hola mundo.", summary: null });
+    expect(blocks[0]).toBe("Reunión de equipo");
+  });
+
+  it("incluye el bloque de metadata (fecha) cuando no hay resumen", () => {
+    const blocks = buildNoteBlocks({ title: "Reunión", createdAt: CREATED_AT, text: "Hola.", summary: null });
+    expect(blocks).toEqual(["Reunión", FORMATTED_DATE, "Transcripción:\nHola."]);
+  });
+
+  it("agrega el proyecto a la línea de metadata cuando está presente", () => {
+    const blocks = buildNoteBlocks({
+      title: "Nota",
+      createdAt: CREATED_AT,
+      projectName: "Trabajo",
+      text: "x",
+      summary: null,
+    });
+    expect(blocks[1]).toBe(`${FORMATTED_DATE} · Trabajo`);
+  });
+
+  it("separa resumen, puntos clave y tareas en bloques independientes cuando hay resumen", () => {
+    const blocks = buildNoteBlocks({ title: "Reunión", createdAt: CREATED_AT, text: "Texto.", summary: SUMMARY });
+    expect(blocks).toEqual([
+      "Reunión",
+      FORMATTED_DATE,
+      "Resumen:\nReunión sobre el roadmap del Q3.",
+      "Puntos clave:\n- Se prioriza el buscador semántico\n- Se descarta el modo offline por ahora",
+      "Tareas y próximos pasos:\n- Armar el proposal de embeddings\n- Agendar la demo con el equipo",
+      "Transcripción:\nTexto.",
+    ]);
+  });
+
+  it("no agrega bloques de puntos clave/tareas si el resumen no los trae", () => {
+    const blocks = buildNoteBlocks({
+      title: "Reunión",
+      createdAt: CREATED_AT,
+      text: "Texto.",
+      summary: { summary: "Resumen breve.", keyPoints: [], actionItems: [] },
+    });
+    expect(blocks).toEqual(["Reunión", FORMATTED_DATE, "Resumen:\nResumen breve.", "Transcripción:\nTexto."]);
+  });
+
+  it("el bloque de transcripción va siempre último y con el prefijo 'Transcripción:'", () => {
+    const blocks = buildNoteBlocks({ title: "Reunión", createdAt: CREATED_AT, text: "Texto final.", summary: SUMMARY });
+    expect(blocks[blocks.length - 1]).toBe("Transcripción:\nTexto final.");
+  });
+
+  it("no genera bloques vacíos ni de solo espacios (ej. sin fecha/proyecto ni título)", () => {
+    const blocks = buildNoteBlocks({ title: "   ", createdAt: "", text: "", summary: null });
+    // Sin fecha/proyecto no hay bloque de metadata; el título vacío cae a "Sin título" (nunca "").
+    expect(blocks.every((b) => b.trim().length > 0)).toBe(true);
+    expect(blocks).toEqual(["Sin título", "Transcripción:\n"]);
+  });
+
+  it("no fragmenta una transcripción multi-párrafo (con saltos de línea en blanco) en bloques extra", () => {
+    // Regression: antes `buildNoteBlocks` hacía `buildNotePlainText(input).split("\n\n")`, así que
+    // cualquier "\n\n" DENTRO de `text` (perfectamente posible en una transcripción real de varios
+    // párrafos) se confundía con el separador ENTRE secciones y partía el bloque en dos, dejando el
+    // segundo párrafo sin el prefijo "Transcripción:".
+    const multiParagraph = "Primer párrafo.\n\nSegundo párrafo.";
+    const blocks = buildNoteBlocks({ title: "Reunión", createdAt: CREATED_AT, text: multiParagraph, summary: null });
+    expect(blocks).toEqual(["Reunión", FORMATTED_DATE, `Transcripción:\n${multiParagraph}`]);
+  });
+
+  it("no fragmenta un resumen multi-párrafo en bloques extra", () => {
+    const multiParagraphSummary = "Primer párrafo del resumen.\n\nSegundo párrafo del resumen.";
+    const blocks = buildNoteBlocks({
+      title: "Reunión",
+      createdAt: CREATED_AT,
+      text: "Texto.",
+      summary: { summary: multiParagraphSummary, keyPoints: [], actionItems: [] },
+    });
+    expect(blocks).toEqual(["Reunión", FORMATTED_DATE, `Resumen:\n${multiParagraphSummary}`, "Transcripción:\nTexto."]);
   });
 });

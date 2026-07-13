@@ -53,11 +53,15 @@ export function buildNoteMarkdown({ title, createdAt, projectName, text, summary
 }
 
 /**
- * Plain-text sibling of `buildNoteMarkdown` — same sections, no Markdown syntax (no `#`/`**`) so
- * it reads cleanly with zero rendering. Used by the "Descargar .txt" button (full note, not just
- * the bare transcription) and, indirectly, whenever the note is copied as plain text.
+ * Shared building block for `buildNotePlainText`/`buildNoteBlocks`: computes the SAME list of
+ * plain-text sections (title, metadata, each summary sub-part, transcription) as a real array,
+ * rather than as a single joined string. `buildNotePlainText` just joins it; `buildNoteBlocks`
+ * returns it as-is. Keeping this as an array (instead of joining then re-splitting on `"\n\n"`)
+ * matters because `text`/`summary.summary` can themselves legitimately contain blank-line
+ * paragraph breaks (multi-paragraph transcripts/summaries) — splitting a joined string back apart
+ * would wrongly fragment those into extra, unlabeled blocks. See `buildNoteBlocks` doc comment.
  */
-export function buildNotePlainText({ title, createdAt, projectName, text, summary }: NoteExportInput): string {
+function buildNoteSections({ title, createdAt, projectName, text, summary }: NoteExportInput): string[] {
   const heading = title.trim() || "Sin título";
   const meta = metaLine(createdAt, projectName);
 
@@ -65,16 +69,42 @@ export function buildNotePlainText({ title, createdAt, projectName, text, summar
   if (meta) sections.push(meta);
 
   if (summary) {
-    const summaryParts = [`Resumen:\n${summary.summary.trim()}`];
+    sections.push(`Resumen:\n${summary.summary.trim()}`);
     if (summary.keyPoints.length > 0) {
-      summaryParts.push(["Puntos clave:", ...summary.keyPoints.map((p) => `- ${p}`)].join("\n"));
+      sections.push(["Puntos clave:", ...summary.keyPoints.map((p) => `- ${p}`)].join("\n"));
     }
     if (summary.actionItems.length > 0) {
-      summaryParts.push(["Tareas y próximos pasos:", ...summary.actionItems.map((a) => `- ${a}`)].join("\n"));
+      sections.push(["Tareas y próximos pasos:", ...summary.actionItems.map((a) => `- ${a}`)].join("\n"));
     }
-    sections.push(summaryParts.join("\n\n"));
   }
 
   sections.push(`Transcripción:\n${text ?? ""}`);
-  return sections.join("\n\n");
+  return sections;
+}
+
+/**
+ * Plain-text sibling of `buildNoteMarkdown` — same sections, no Markdown syntax (no `#`/`**`) so
+ * it reads cleanly with zero rendering. Used by the "Descargar .txt" button (full note, not just
+ * the bare transcription) and, indirectly, whenever the note is copied as plain text.
+ */
+export function buildNotePlainText(input: NoteExportInput): string {
+  return buildNoteSections(input).join("\n\n");
+}
+
+/**
+ * Mismo contenido que `buildNotePlainText`, pero como un array de bloques (uno por "sección" —
+ * título, metadata, cada parte del resumen, transcripción) en vez de un único string. Pensado para
+ * los exports a .docx/.pdf: cada bloque se renderiza como un párrafo/heading propio en esos
+ * formatos, sin tener que re-derivar título/fecha/proyecto/resumen/transcripción por separado (esa
+ * lógica vive UNA sola vez en `buildNoteSections`, compartida con `buildNotePlainText`).
+ *
+ * Devuelve `buildNoteSections` directamente (NO hace `buildNotePlainText(...).split("\n\n")`):
+ * si lo hiciera, un `text`/`summary.summary` con su propio salto de línea en blanco (transcripción
+ * o resumen multi-párrafo, algo perfectamente posible) se fragmentaría en bloques extra sin label
+ * ("Transcripción:"/"Resumen:" solo quedaría en el primer párrafo). Al construir el array de
+ * secciones directamente, cada bloque preserva TODOS sus saltos de línea internos (simples o
+ * dobles) tal cual, y el split conflict no puede pasar.
+ */
+export function buildNoteBlocks(input: NoteExportInput): string[] {
+  return buildNoteSections(input).filter((block) => block.trim().length > 0);
 }
