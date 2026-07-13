@@ -34,6 +34,17 @@ export const MAX_BRAIN_QUESTION_CHARS = 4_000;
 /** Output token ceiling per answer — same value and criteria as `CHAT_MAX_OUTPUT_TOKENS`. */
 export const BRAIN_MAX_OUTPUT_TOKENS = 2_048;
 
+/** Minimum number of FTS retrieval results before also fetching the user's most recent notes as
+ * extra candidate context (see `shouldFetchRecentFallback`/`mergeWithRecentNotes` in
+ * `src/lib/brain/retrieval.ts`). This is a PALLIATIVE for FTS's keyword-matching limitation, not a
+ * fix: `websearch_to_tsquery` only matches shared vocabulary, so a question like "cuántos audios de
+ * test hice" finds nothing against a note that says "intento de grabación" even though the user's
+ * notes could still answer it — falling back to recent notes when retrieval is sparse gives the model
+ * something to reason over instead of a guaranteed "no encontré nada". The real fix is SEMANTIC
+ * search (embeddings/pgvector), already tracked as a follow-up in `.claude/resources/ROADMAP.md`
+ * under "Segundo cerebro" ("La búsqueda SEMÁNTICA (embeddings/pgvector) queda como follow-up"). */
+export const MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK = 3;
+
 /** true if `text` is a valid question to send to the Segundo cerebro: non-empty after trim and within
  * `MAX_BRAIN_QUESTION_CHARS`. Pure — called from the route BEFORE touching Supabase/Groq, same
  * criteria as `isValidChatMessageText`. */

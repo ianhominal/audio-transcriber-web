@@ -11,10 +11,17 @@ import {
   BRAIN_MODEL,
   BRAIN_MAX_OUTPUT_TOKENS,
   MAX_BRAIN_QUESTION_CHARS,
+  RETRIEVAL_TOP_K,
   isValidBrainQuestionText,
   buildBrainSystemPrompt,
 } from "@/lib/brain/config";
-import { buildRetrievalFilters, buildBrainContext, type BrainSourceNote } from "@/lib/brain/retrieval";
+import {
+  buildRetrievalFilters,
+  buildBrainContext,
+  shouldFetchRecentFallback,
+  mergeWithRecentNotes,
+  type BrainSourceNote,
+} from "@/lib/brain/retrieval";
 import { extractUiMessageText } from "@/lib/chat/messages";
 
 export const runtime = "nodejs";
@@ -149,7 +156,42 @@ export async function POST(req: NextRequest) {
     text: row.text ?? "",
     summary: row.summary,
   }));
-  const { contextText } = buildBrainContext(sourceNotes);
+
+  // 1.5) Fallback a las notas más recientes cuando el FTS trajo poco (ver comentario de
+  //      `MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK` en `src/lib/brain/config.ts`): la búsqueda por
+  //      palabras clave no encuentra nada si la pregunta no comparte vocabulario con las notas, aunque
+  //      estas SÍ podrían responderla — es un PALIATIVO, no un reemplazo de búsqueda semántica.
+  //      Lectura de solo lectura y BEST-EFFORT: si falla, seguimos con lo que el FTS ya trajo, nunca
+  //      bloquea el request por esto. Corre ANTES del cap de costo (paso 2, más abajo) — es una
+  //      lectura gratis, no consume el cap diario de llamadas a Groq.
+  let finalSourceNotes = sourceNotes;
+  if (shouldFetchRecentFallback(sourceNotes.length)) {
+    const { data: recentData, error: recentError } = await supabase
+      .from("transcriptions")
+      .select("id, title, text, summary, created_at")
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(RETRIEVAL_TOP_K);
+
+    if (recentError) {
+      console.error("[brain] recent-notes fallback failed", { userId: user.id, error: recentError.message });
+      Sentry.captureException(new Error(recentError.message || "Error al buscar notas recientes."), {
+        extra: { userId: user.id, stage: "brain-recent-fallback" },
+      });
+    } else {
+      const recentSourceNotes: BrainSourceNote[] = ((recentData ?? []) as unknown as NoteRow[]).map((row) => ({
+        id: row.id,
+        title: row.title ?? "",
+        createdAt: row.created_at,
+        text: row.text ?? "",
+        summary: row.summary,
+      }));
+      finalSourceNotes = mergeWithRecentNotes(sourceNotes, recentSourceNotes);
+    }
+  }
+
+  const { contextText } = buildBrainContext(finalSourceNotes);
 
   // 2) Cap de costo/abuso por usuario/24h — reserve-on-attempt, mismo mecanismo atómico que el resto
   //    de las features IA de esta app (ver header comment).

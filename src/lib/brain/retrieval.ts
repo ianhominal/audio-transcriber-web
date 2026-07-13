@@ -1,5 +1,5 @@
 import { sanitizeSearchQuery } from "@/lib/search/query";
-import { MAX_BRAIN_CONTEXT_CHARS, RETRIEVAL_TOP_K } from "./config";
+import { MAX_BRAIN_CONTEXT_CHARS, RETRIEVAL_TOP_K, MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK } from "./config";
 
 /**
  * "Segundo cerebro" (feature 2026-07-13, see brief) — retrieval helpers. PURE module (no Supabase
@@ -118,4 +118,30 @@ function parseSummaryFallback(raw: string | null): string {
   } catch {
     return "";
   }
+}
+
+/** true if the FTS retrieval returned fewer than `MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK` notes — the
+ * route should also fetch the user's most recent notes as extra candidate context (see
+ * `mergeWithRecentNotes`, and `MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK` in `./config` for why this is a
+ * palliative for FTS, not a fix). */
+export function shouldFetchRecentFallback(ftsResultCount: number): boolean {
+  return ftsResultCount < MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK;
+}
+
+/**
+ * Merges FTS retrieval results with the user's most recent notes as fallback candidate context when
+ * FTS came back sparse (see `shouldFetchRecentFallback`). Returns `ftsNotes` FIRST, in their original
+ * order, UNTOUCHED, followed by any `recentNotes` whose `id` is not already present in `ftsNotes`, in
+ * the order `recentNotes` was given — so a note found by both never appears twice. No length/count cap
+ * here on purpose: `buildBrainContext` already stops once `MAX_BRAIN_CONTEXT_CHARS` is reached, so
+ * simply feeding it more candidates when FTS is sparse is enough; this is a candidate LIST, not the
+ * final context, so it can't blow the cost cap.
+ */
+export function mergeWithRecentNotes(
+  ftsNotes: readonly BrainSourceNote[],
+  recentNotes: readonly BrainSourceNote[]
+): BrainSourceNote[] {
+  const seenIds = new Set(ftsNotes.map((note) => note.id));
+  const extraNotes = recentNotes.filter((note) => !seenIds.has(note.id));
+  return [...ftsNotes, ...extraNotes];
 }

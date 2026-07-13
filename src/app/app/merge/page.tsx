@@ -25,6 +25,10 @@ export default async function MergePage({
 
   const supabase = await createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const { data: project } = await supabase
     .from("projects")
     .select("id, name")
@@ -34,10 +38,15 @@ export default async function MergePage({
 
   if (!project) notFound();
 
+  // Defense-in-depth ON TOP of RLS (mismo criterio que `/api/notes/merge`/`/api/brain`, ver sus
+  // header comments): `user?.id ?? ""` nunca lanza si `user` fuera `null` — un filtro con user_id
+  // vacío simplemente no matchea ninguna fila, mismo criterio fail-safe que ya usa esta página para
+  // un proyecto inexistente/ajeno (`notFound()` arriba).
   const { data: notesData } = await supabase
     .from("transcriptions")
     .select("id, title, created_at")
     .eq("project_id", projectId)
+    .eq("user_id", user?.id ?? "")
     .is("deleted_at", null)
     .order("created_at", { ascending: true })
     .limit(MAX_MERGE_NOTES);

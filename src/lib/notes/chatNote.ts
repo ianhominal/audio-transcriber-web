@@ -22,6 +22,17 @@ export const CHAT_NOTE_AUDIO_NAME = "Nota del chat";
  * se distinga de un vistazo en la lista, además del tag `CHAT_NOTE_TAG`. */
 export const CHAT_NOTE_ICON = "💬";
 
+/** Character cap on the note text — same "hard cost/abuse defense" criteria as
+ * `MAX_MERGE_INPUT_CHARS`/`MAX_SUMMARY_INPUT_CHARS`/`MAX_CHAT_CONTEXT_INPUT_CHARS`/
+ * `MAX_RECIPE_INPUT_CHARS`/`MAX_TITLE_TAGS_INPUT_CHARS`/`MAX_TRANSLATION_INPUT_CHARS` — each module in
+ * this repo declares its own cap, never imported cross-module, same established convention. This note
+ * is written into the SAME `transcriptions` table whose `search_vector` is a
+ * `GENERATED ALWAYS AS (...) STORED` column with a GIN index (`20260713150000_search_vector.sql`) —
+ * unbounded text degrades both raw storage and that index. TRUNCATES (doesn't reject): this saves a
+ * chat AI response, not a short interactively-typed field (compare `MAX_CHAT_MESSAGE_CHARS`/
+ * `MAX_BRAIN_QUESTION_CHARS`, which reject at 4,000). */
+export const MAX_CHAT_NOTE_TEXT_CHARS = 40_000;
+
 /** Título por defecto si no se puede derivar nada útil del texto. */
 const FALLBACK_TITLE = "Nota del chat";
 
@@ -68,9 +79,12 @@ export function buildChatNoteDraft(rawText: string): ChatNoteDraftResult {
   const text = (rawText ?? "").trim();
   if (!text) return { error: "No hay contenido para guardar." };
 
+  const truncatedText =
+    text.length > MAX_CHAT_NOTE_TEXT_CHARS ? text.slice(0, MAX_CHAT_NOTE_TEXT_CHARS) : text;
+
   return {
     title: deriveChatNoteTitle(text),
-    text,
+    text: truncatedText,
     audio_name: CHAT_NOTE_AUDIO_NAME,
     icon: CHAT_NOTE_ICON,
     tags: [CHAT_NOTE_TAG],

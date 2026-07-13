@@ -7,16 +7,25 @@ vi.mock("@/lib/supabase/api", () => ({
 }));
 
 import { getApiUser } from "@/lib/supabase/api";
+import { DAILY_LIMIT } from "@/lib/rateLimit";
 import { POST } from "./route";
 
 type InsertResult = { data: { id: string } | null; error: { message: string; code?: string } | null };
+type DailyCountResult = { count: number | null; error: { message: string; code?: string } | null };
 
 /**
- * Fake Supabase client: solo cubre `insert().select().single()` — la única forma que usa este
- * route. Soporta devolver resultados DISTINTOS en sucesivas llamadas (`insertResults`, consumidos
- * en orden) para poder testear la cascada de compat de `tags` (42703 → reintento sin esa columna).
+ * Fake Supabase client: cubre `insert().select().single()` (la forma que usa el guardado de la nota)
+ * y `select("id", {count,head}).eq().gte()` (el chequeo de límite diario compartido con
+ * `/api/transcribe` — misma distinción por forma de los argumentos que
+ * `api/transcribe/route.test.ts`). Soporta devolver resultados DISTINTOS en sucesivas llamadas al
+ * insert (`insertResults`, consumidos en orden) para poder testear la cascada de compat de `tags`
+ * (42703 → reintento sin esa columna). `dailyCount` default `{count: 0, error: null}` para no romper
+ * los tests que no le pasan nada explícito.
  */
-function createFakeSupabase(insertResults: InsertResult[]) {
+function createFakeSupabase(
+  insertResults: InsertResult[],
+  dailyCount: DailyCountResult = { count: 0, error: null }
+) {
   const insertCalls: Record<string, unknown>[] = [];
   let call = 0;
 
@@ -24,6 +33,12 @@ function createFakeSupabase(insertResults: InsertResult[]) {
     from(table: string) {
       if (table !== "transcriptions") throw new Error(`Unexpected table in test: ${table}`);
       return {
+        select(_cols: string, opts?: { count?: string; head?: boolean }) {
+          if (opts && opts.count) {
+            return { eq: () => ({ gte: () => Promise.resolve(dailyCount) }) };
+          }
+          throw new Error("Unexpected select shape in test");
+        },
         insert(payload: Record<string, unknown>) {
           insertCalls.push(payload);
           const result = insertResults[Math.min(call, insertResults.length - 1)];
@@ -114,5 +129,58 @@ describe("POST /api/notes — creación", () => {
     mockUser(supabase);
     const res = await postNotes({ text: "algo" });
     expect(res.status).toBe(500);
+  });
+});
+
+describe("POST /api/notes — límite diario compartido con /api/transcribe", () => {
+  it("429 si ya alcanzó el límite diario (misma cuota que /api/transcribe)", async () => {
+    const supabase = createFakeSupabase(
+      [{ data: { id: "note-x" }, error: null }],
+      { count: DAILY_LIMIT, error: null }
+    );
+    mockUser(supabase);
+
+    const res = await postNotes({ text: "algo" });
+    expect(res.status).toBe(429);
+    const json = await res.json();
+    expect(json.error).toBe("Llegaste al límite diario de transcripciones. Probá mañana o escribinos.");
+    expect(supabase.insertCalls).toHaveLength(0);
+  });
+
+  it("503 si falla la query de conteo diario (fail-closed, no asume 0 consumido)", async () => {
+    const supabase = createFakeSupabase(
+      [{ data: { id: "note-x" }, error: null }],
+      { count: null, error: { message: "connection reset" } }
+    );
+    mockUser(supabase);
+
+    const res = await postNotes({ text: "algo" });
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.error).toBe("No pudimos verificar tu límite diario. Probá de nuevo.");
+    expect(supabase.insertCalls).toHaveLength(0);
+  });
+
+  it("guarda la nota normalmente si está bajo el límite diario", async () => {
+    const supabase = createFakeSupabase(
+      [{ data: { id: "note-y" }, error: null }],
+      { count: DAILY_LIMIT - 1, error: null }
+    );
+    mockUser(supabase);
+
+    const res = await postNotes({ text: "algo bajo el límite" });
+    expect(res.status).toBe(200);
+    expect(supabase.insertCalls).toHaveLength(1);
+  });
+
+  it("400 por texto vacío sigue ganando sobre el chequeo de límite diario (ni siquiera lo consulta)", async () => {
+    const supabase = createFakeSupabase(
+      [{ data: { id: "note-z" }, error: null }],
+      { count: DAILY_LIMIT, error: null }
+    );
+    mockUser(supabase);
+
+    const res = await postNotes({ text: "   " });
+    expect(res.status).toBe(400);
   });
 });

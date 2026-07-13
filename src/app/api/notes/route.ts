@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getApiUser } from "@/lib/supabase/api";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { buildChatNoteDraft } from "@/lib/notes/chatNote";
+import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -38,6 +40,39 @@ export async function POST(req: NextRequest) {
   const draft = buildChatNoteDraft(typeof body.text === "string" ? body.text : "");
   if ("error" in draft) {
     return NextResponse.json({ error: draft.error }, { status: 400 });
+  }
+
+  // Límite diario COMPARTIDO con `/api/transcribe`: esta nota se inserta en la MISMA tabla
+  // `transcriptions`, así que consume la MISMA cuota (no una separada). Mismo patrón fail-CLOSED
+  // (ver comentario de `/api/transcribe`, corrección del review adversarial 2026-07-10, hallazgo
+  // MEDIUM #4): si la query de conteo falla, NO se asume "0 consumido" — se corta con 503 en vez de
+  // dejar pasar sin verificar.
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: dailyCount, error: dailyCountErr } = await supabase
+    .from("transcriptions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", oneDayAgo);
+
+  if (dailyCountErr) {
+    console.error("[notes] daily limit count failed", {
+      userId: user.id,
+      error: dailyCountErr.message,
+    });
+    Sentry.captureException(new Error(dailyCountErr.message || "Error al verificar el límite diario."), {
+      extra: { userId: user.id, stage: "daily-limit-count" },
+    });
+    return NextResponse.json(
+      { error: "No pudimos verificar tu límite diario. Probá de nuevo." },
+      { status: 503 }
+    );
+  }
+
+  if (isOverDailyLimit(dailyCount ?? 0, DAILY_LIMIT)) {
+    return NextResponse.json(
+      { error: "Llegaste al límite diario de transcripciones. Probá mañana o escribinos." },
+      { status: 429 }
+    );
   }
 
   const baseRow = {

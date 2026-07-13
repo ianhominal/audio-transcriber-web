@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { buildChatNoteDraft, deriveChatNoteTitle, CHAT_NOTE_TAG, CHAT_NOTE_AUDIO_NAME, CHAT_NOTE_ICON } from "./chatNote";
+import {
+  buildChatNoteDraft,
+  deriveChatNoteTitle,
+  CHAT_NOTE_TAG,
+  CHAT_NOTE_AUDIO_NAME,
+  CHAT_NOTE_ICON,
+  MAX_CHAT_NOTE_TEXT_CHARS,
+} from "./chatNote";
 
 describe("deriveChatNoteTitle", () => {
   it("usa la primera línea no vacía como título", () => {
@@ -52,5 +59,15 @@ describe("buildChatNoteDraft", () => {
   it("nunca lanza con undefined/null", () => {
     expect(() => buildChatNoteDraft(undefined as unknown as string)).not.toThrow();
     expect(() => buildChatNoteDraft(null as unknown as string)).not.toThrow();
+  });
+
+  it("trunca el texto a MAX_CHAT_NOTE_TEXT_CHARS si lo supera", () => {
+    const long = "a".repeat(MAX_CHAT_NOTE_TEXT_CHARS + 500);
+    const draft = buildChatNoteDraft(long);
+    expect("error" in draft).toBe(false);
+    if (!("error" in draft)) {
+      expect(draft.text.length).toBe(MAX_CHAT_NOTE_TEXT_CHARS);
+      expect(draft.text).toBe(long.slice(0, MAX_CHAT_NOTE_TEXT_CHARS));
+    }
   });
 });

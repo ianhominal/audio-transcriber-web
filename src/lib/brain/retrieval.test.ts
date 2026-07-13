@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { buildRetrievalFilters, buildBrainContext, type BrainSourceNote } from "./retrieval";
-import { RETRIEVAL_TOP_K, MAX_BRAIN_CONTEXT_CHARS } from "./config";
+import {
+  buildRetrievalFilters,
+  buildBrainContext,
+  shouldFetchRecentFallback,
+  mergeWithRecentNotes,
+  type BrainSourceNote,
+} from "./retrieval";
+import { RETRIEVAL_TOP_K, MAX_BRAIN_CONTEXT_CHARS, MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK } from "./config";
 
 function note(id: string, title: string, createdAt: string, text: string, summary: string | null = null): BrainSourceNote {
   return { id, title, createdAt, text, summary };
@@ -107,5 +113,55 @@ describe("buildBrainContext", () => {
     const notes = [note("1", "", "2026-07-01T10:00:00Z", "Algo.")];
     const result = buildBrainContext(notes);
     expect(result.contextText).toContain("## Sin título (2026-07-01)");
+  });
+});
+
+describe("shouldFetchRecentFallback", () => {
+  it("false cuando el conteo de FTS ya alcanza o supera el umbral", () => {
+    expect(shouldFetchRecentFallback(MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK)).toBe(false);
+    expect(shouldFetchRecentFallback(MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK + 5)).toBe(false);
+  });
+
+  it("true cuando el conteo de FTS está por debajo del umbral", () => {
+    expect(shouldFetchRecentFallback(0)).toBe(true);
+    expect(shouldFetchRecentFallback(MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK - 1)).toBe(true);
+  });
+});
+
+describe("mergeWithRecentNotes", () => {
+  it("con 0 resultados de FTS, usa todas las notas recientes", () => {
+    const recent = [
+      note("1", "A", "2026-07-01T10:00:00Z", "texto A"),
+      note("2", "B", "2026-07-02T10:00:00Z", "texto B"),
+    ];
+    expect(mergeWithRecentNotes([], recent)).toEqual(recent);
+  });
+
+  it("una nota presente en AMBAS listas aparece una sola vez, con el orden del FTS primero", () => {
+    const fts = [note("1", "FTS", "2026-07-01T10:00:00Z", "texto fts")];
+    const recent = [
+      note("1", "FTS", "2026-07-01T10:00:00Z", "texto fts"),
+      note("2", "Reciente", "2026-07-03T10:00:00Z", "texto reciente"),
+    ];
+    const result = mergeWithRecentNotes(fts, recent);
+    expect(result.map((n) => n.id)).toEqual(["1", "2"]);
+  });
+
+  it("agrega las notas recientes-solamente en el orden en que llegaron", () => {
+    const fts = [note("1", "FTS", "2026-07-01T10:00:00Z", "texto fts")];
+    const recent = [
+      note("3", "C", "2026-07-04T10:00:00Z", "texto C"),
+      note("2", "B", "2026-07-03T10:00:00Z", "texto B"),
+    ];
+    const result = mergeWithRecentNotes(fts, recent);
+    expect(result.map((n) => n.id)).toEqual(["1", "3", "2"]);
+  });
+
+  it("con recentNotes vacío, es un no-op (devuelve solo las de FTS, sin tocar su orden)", () => {
+    const fts = [
+      note("1", "FTS", "2026-07-01T10:00:00Z", "texto fts"),
+      note("2", "FTS2", "2026-07-02T10:00:00Z", "texto fts2"),
+    ];
+    expect(mergeWithRecentNotes(fts, [])).toEqual(fts);
   });
 });
