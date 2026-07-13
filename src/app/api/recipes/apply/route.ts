@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { streamText } from "ai";
-import { groq } from "@ai-sdk/groq";
 import { getApiUser } from "@/lib/supabase/api";
 import { isMissingTableError } from "@/lib/supabase/schema-compat";
 import { isAiRecipeDailyLimitError } from "@/lib/aiUsage";
-import { buildRecipePrompt } from "@/lib/recipes/validate";
+import { buildRecipeModelCall } from "@/lib/recipes/apply";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
-
-// Mismo modelo que el chat (`CHAT_MODEL`, `src/lib/chat/config.ts`) — no se importa la constante
-// para no acoplar `recipes` a `chat` (dos features independientes que hoy comparten proveedor/modelo
-// por casualidad, no por diseño): "aplicar un formato" es, como el chat, generación de calidad
-// conversacional/redaccional (un brief, una escaleta), no una tarea estructurada corta como el
-// resumen (que sí usa el modelo barato `llama-3.1-8b-instant`).
-const RECIPE_MODEL = "llama-3.3-70b-versatile";
 
 /**
  * Aplica un "Formato" (instrucción reutilizable, ver brief "Formatos" 2026-07-13) a UNA
@@ -129,11 +121,13 @@ export async function POST(req: NextRequest) {
     // que `/api/chat`.
   }
 
-  // 4) Generación + streaming. Single-shot (sin `messages`/historial) — `buildRecipePrompt` arma la
-  //    instrucción del usuario + el texto de la nota (recortado) en un único prompt.
+  // 4) Generación + streaming. Single-shot (sin `messages`/historial) — `buildRecipeModelCall` arma
+  //    el modelo + la instrucción del usuario + el texto de la nota (recortado) en un único prompt,
+  //    MISMO helper que usa el auto-apply best-effort no-streaming de `/api/transcribe` (ver
+  //    `src/lib/recipes/apply.ts`) — un único punto de verdad para "qué modelo/prompt se usa al
+  //    aplicar un formato", nunca duplicado entre streaming y no-streaming.
   const result = streamText({
-    model: groq(RECIPE_MODEL),
-    prompt: buildRecipePrompt(recipe.instruction, transcriptionText),
+    ...buildRecipeModelCall(recipe.instruction, transcriptionText),
     onError: (error) => {
       console.error("[recipes-apply] stream error", { userId: user.id, transcriptionId, recipeId, error });
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {

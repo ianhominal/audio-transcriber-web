@@ -18,6 +18,7 @@ import { listVocabularyTerms } from "@/lib/vocabulary/store";
 import { correctTextWithVocabulary } from "@/lib/vocabulary/groq";
 import { generateTitleAndTags } from "@/lib/titleTags/groq";
 import { canGenerateTitleTags, isPlaceholderTitle } from "@/lib/titleTags/validate";
+import { autoApplyDefaultRecipe } from "@/lib/recipes/autoApply";
 import { isAiTitleTagsDailyLimitError } from "@/lib/aiUsage";
 import { isMissingColumnError, isMissingTableError } from "@/lib/supabase/schema-compat";
 
@@ -330,18 +331,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 2.7) Auto-título + auto-tags Y 3) Subir el audio a Storage — EN PARALELO (no secuencial, fix del
-  //      review adversarial de esta misma tanda). Los dos pasos son independientes entre sí (título/
-  //      tags solo necesita `finalText`/`translatedTo`/`language`; la subida solo necesita `file`/
+  // 2.7) Auto-título + auto-tags, 2.7-bis) auto-aplicar el Formato default, Y 3) Subir el audio a
+  //      Storage — EN PARALELO (no secuencial, fix del review adversarial de la tanda de título/tags).
+  //      Los tres pasos son independientes entre sí (título/tags y el auto-apply de formato solo
+  //      necesitan `finalText`/`translatedTo`/`language`/`user.id`; la subida solo necesita `file`/
   //      `audioName`) y cada uno best-effort por separado — ninguno puede rechazar la promesa que
   //      Promise.all espera (cada uno tiene su propio try/catch interno que nunca re-lanza, ver
-  //      abajo). Encadenarlos secuencialmente sumaba hasta 8s más (el timeout de título/tags) DESPUÉS
-  //      de transcribir+traducir+corregir vocabulario y ANTES de guardar — acercando el request al
-  //      techo de `maxDuration = 60` más de lo necesario, justo el riesgo que la regla de oro de 2.7
-  //      (nunca demorar la transcripción) existe para evitar.
+  //      abajo). Encadenarlos secuencialmente sumaba tiempo de más DESPUÉS de transcribir+traducir+
+  //      corregir vocabulario y ANTES de guardar — acercando el request al techo de `maxDuration = 60`
+  //      más de lo necesario, justo el riesgo que la regla de oro de 2.7 (nunca demorar la
+  //      transcripción) existe para evitar. El auto-apply de formato (2.7-bis, ver
+  //      `src/lib/recipes/autoApply.ts`) sigue exactamente el mismo patrón: mismo `Promise.all`, mismo
+  //      criterio best-effort estricto, mismo "nunca bloquea ni demora el guardado".
   let autoTags: string[] = [];
   let autoTitle: string | null = null;
   let audioPath: string | null = null;
+  let defaultRecipeOutput: string | null = null;
+  let defaultRecipeName: string | null = null;
 
   await Promise.all([
     // 2.7) Auto-título + auto-tags (tanda 3 de quick wins, ver ROADMAP.md): UNA sola llamada al LLM
@@ -411,6 +417,35 @@ export async function POST(req: NextRequest) {
         // criterio que el try/catch extra alrededor de `translateText`/`correctTextWithVocabulary`.
         console.error("[transcribe] title/tags step threw", err);
         Sentry.captureException(err, { extra: { userId: user.id, stage: "title-tags" } });
+      }
+    })(),
+
+    // 2.7-bis) Auto-aplicar el Formato default del usuario (ver brief "Auto-apply default Format on
+    //          transcription"): si tiene un `ai_recipes` marcado `is_default = true`, corre su
+    //          instrucción sobre `finalText` (el texto FINAL: traducido/corregido si aplica, mismo
+    //          criterio que título/tags — el resultado debe describir lo que la usuaria realmente va a
+    //          leer) NO streaming, y guarda el resultado junto con el NOMBRE del formato (snapshot al
+    //          momento — ver la migración) para persistirlo en el insert del paso 4.
+    //
+    //          REGLA DE ORO (best-effort ESTRICTO, mismo criterio que título/tags): `autoApplyDefault
+    //          Recipe` está documentada para NUNCA lanzar (siempre devuelve `null` ante cualquier
+    //          falla — sin formato default, tabla sin migrar, cap alcanzado, timeout, error del
+    //          modelo — ver `src/lib/recipes/autoApply.ts`) Y este paso vive en su propio try/catch,
+    //          igual que el resto de los pasos de este `Promise.all` — ningún error acá puede
+    //          propagarse y tirar abajo el resto del request ni demorar el guardado de la
+    //          transcripción.
+    (async () => {
+      try {
+        const result = await autoApplyDefaultRecipe(supabase, user.id, finalText);
+        if (result) {
+          defaultRecipeOutput = result.output;
+          defaultRecipeName = result.recipeName;
+        }
+      } catch (err) {
+        // Defensa en profundidad — `autoApplyDefaultRecipe` está documentada para nunca lanzar, mismo
+        // criterio que el try/catch extra alrededor de `translateText`/`correctTextWithVocabulary`.
+        console.error("[transcribe] default recipe auto-apply step threw", err);
+        Sentry.captureException(err, { extra: { userId: user.id, stage: "auto-apply-recipe" } });
       }
     })(),
 
@@ -486,20 +521,23 @@ export async function POST(req: NextRequest) {
     };
     // `translated_to`/`original_text` (Fase F4, ver supabase/migrations/20260709210000_translation.sql),
     // `vocabulary_corrected` (feature de vocabulario custom, ver
-    // supabase/migrations/20260710120000_user_vocabulary.sql) y `tags` (tanda 3 de quick wins, ver
-    // supabase/migrations/20260711160000_transcription_tags.sql) se aplican automático recién al
-    // mergear a `main` (mismo criterio que `projects.color` en F2) — en el preview de esta branch
-    // pueden no existir todavía, e INDEPENDIENTEMENTE unas de otras (F4 puede estar aplicada y
+    // supabase/migrations/20260710120000_user_vocabulary.sql), `tags` (tanda 3 de quick wins, ver
+    // supabase/migrations/20260711160000_transcription_tags.sql) y `default_recipe_output`/
+    // `default_recipe_name` (auto-apply del Formato default, ver
+    // supabase/migrations/20260713130000_transcription_default_recipe.sql) se aplican automático
+    // recién al mergear a `main` (mismo criterio que `projects.color` en F2) — en el preview de esta
+    // branch pueden no existir todavía, e INDEPENDIENTEMENTE unas de otras (F4 puede estar aplicada y
     // vocabulario no, es el caso más común en el día a día). Se intenta con TODAS las columnas
     // nuevas primero y, ante un 42703 (columna inexistente), se cae en cascada, MÁS NUEVA primero:
-    // sin `tags`, después sin `vocabulary_corrected` tampoco, después sin ninguna de las cuatro. En
-    // cualquier nivel, el texto final (traducido y/o corregido) SIGUE llegando al usuario en la
-    // respuesta de este request (`finalText`), solo no queda etiquetado en la fila hasta que la
-    // migración correspondiente esté aplicada. A diferencia de `projects.color` en F2 (que usa el
-    // cache compartido de `schema-compat.ts` con TTL porque tiene muchos call-sites), acá se detecta
-    // por intento directo sin cache: la ventana de "migración sin aplicar" es corta y de bajo
-    // tráfico. OJO: hay OTRO retry de compat en el read-path del detalle (`app/t/[id]/page.tsx`), en
-    // el dashboard (`app/page.tsx`) y en el dedupe de más arriba — todos independientes y sin cache a
+    // sin `default_recipe_output`/`default_recipe_name`, después sin `tags` tampoco, después sin
+    // `vocabulary_corrected` tampoco, después sin ninguna de las cinco. En cualquier nivel, el texto
+    // final (traducido y/o corregido) SIGUE llegando al usuario en la respuesta de este request
+    // (`finalText`), solo no queda etiquetado/con formato en la fila hasta que la migración
+    // correspondiente esté aplicada. A diferencia de `projects.color` en F2 (que usa el cache
+    // compartido de `schema-compat.ts` con TTL porque tiene muchos call-sites), acá se detecta por
+    // intento directo sin cache: la ventana de "migración sin aplicar" es corta y de bajo tráfico.
+    // OJO: hay OTRO retry de compat en el read-path del detalle (`app/t/[id]/page.tsx`), en el
+    // dashboard (`app/page.tsx`) y en el dedupe de más arriba — todos independientes y sin cache a
     // propósito; si esto se volviera caliente, valdría unificarlos en un cache compartido como F2.
     let insertResult = await supabase
       .from("transcriptions")
@@ -509,10 +547,27 @@ export async function POST(req: NextRequest) {
         original_text: originalText,
         vocabulary_corrected: vocabularyCorrected,
         tags: autoTags,
+        default_recipe_output: defaultRecipeOutput,
+        default_recipe_name: defaultRecipeName,
       })
       .select("id")
       .single();
     tagsSaved = !insertResult.error;
+
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      insertResult = await supabase
+        .from("transcriptions")
+        .insert({
+          ...baseRow,
+          translated_to: translatedTo,
+          original_text: originalText,
+          vocabulary_corrected: vocabularyCorrected,
+          tags: autoTags,
+        })
+        .select("id")
+        .single();
+      tagsSaved = !insertResult.error;
+    }
 
     if (insertResult.error && isMissingColumnError(insertResult.error)) {
       insertResult = await supabase

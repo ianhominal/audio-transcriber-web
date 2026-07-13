@@ -59,6 +59,15 @@ type Transcription = {
   // (best-effort) o quitados a mano desde acá — siempre un array (nunca undefined/null: la columna
   // es NOT NULL DEFAULT '{}' y `page.tsx` ya degrada a `[]` durante la ventana de rollout).
   tags: string[];
+  // Auto-apply del Formato default al transcribir (ver
+  // supabase/migrations/20260713130000_transcription_default_recipe.sql /
+  // src/lib/recipes/autoApply.ts): `null` si el usuario no tenía formato default, si el auto-apply
+  // falló/tardó de más, o si la migración todavía no está aplicada (`page.tsx` ya degrada a `null`
+  // durante la ventana de rollout) — en cualquiera de esos casos el panel de abajo no se renderiza.
+  // `default_recipe_name` es un snapshot del NOMBRE del formato al momento de aplicarlo (sigue
+  // mostrándose igual aunque el formato se renombre o se borre después).
+  default_recipe_output?: string | null;
+  default_recipe_name?: string | null;
 };
 
 type Project = { id: string; name: string; icon: string };
@@ -132,6 +141,11 @@ export function TranscriptionDetail({
   const [applyDone, setApplyDone] = useState(false);
   const [savingApplyNote, setSavingApplyNote] = useState(false);
   const [applyNoteSavedId, setApplyNoteSavedId] = useState<string | null>(null);
+  // Panel "Formato aplicado" (auto-apply del formato default al transcribir, ver
+  // src/lib/recipes/autoApply.ts): estado propio de "Guardar como nota" — INDEPENDIENTE del de
+  // "Aplicar formato" (manual) de arriba, son dos resultados/fuentes distintas.
+  const [savingDefaultRecipeNote, setSavingDefaultRecipeNote] = useState(false);
+  const [defaultRecipeNoteSavedId, setDefaultRecipeNoteSavedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -320,6 +334,34 @@ export function TranscriptionDetail({
       toast("No se pudo contactar al servidor.", "error");
     } finally {
       setSavingApplyNote(false);
+    }
+  }
+
+  /** "Guardar como nota" del resultado del Formato aplicado AUTOMÁTICAMENTE al transcribir (panel
+   * "Formato aplicado", ver `default_recipe_output`) — mismo endpoint/shape que
+   * `saveApplyOutputAsNote` de arriba (aplicación manual), pero con su propio estado: son dos
+   * resultados independientes, guardarlos no debe interferir entre sí. */
+  async function saveDefaultRecipeOutputAsNote() {
+    const output = transcription.default_recipe_output;
+    if (!output || !output.trim() || savingDefaultRecipeNote) return;
+    setSavingDefaultRecipeNote(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: output }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error ?? "No se pudo guardar la nota.", "error");
+        return;
+      }
+      setDefaultRecipeNoteSavedId(data.id);
+      toast("Guardado ✓", "success");
+    } catch {
+      toast("No se pudo contactar al servidor.", "error");
+    } finally {
+      setSavingDefaultRecipeNote(false);
     }
   }
 
@@ -758,6 +800,53 @@ export function TranscriptionDetail({
           )}
         </div>
       </div>
+
+      {/* Formato aplicado automáticamente al transcribir (auto-apply del formato default, ver
+          src/lib/recipes/autoApply.ts / supabase/migrations/20260713130000_transcription_default_recipe.sql).
+          Solo se renderiza si el auto-apply corrió y tuvo éxito — si el usuario no tiene formato
+          default, o el auto-apply falló/tardó de más, `default_recipe_output` viene `null` y esta
+          sección no agrega NADA al detalle (el resto de la pantalla queda exactamente igual). Mismo
+          patrón visual/de acciones que la tarjeta "Aplicar formato" (manual) de arriba, para
+          consistencia — pero es contenido YA generado (no hay botón "Aplicar" ni estado "Generando…"
+          acá, el resultado ya está persistido en la fila). */}
+      {transcription.default_recipe_output && (
+        <section
+          aria-labelledby="default-recipe-heading"
+          className="mt-5 rounded-xl border border-border-strong bg-surface p-4"
+        >
+          <h3 id="default-recipe-heading" className="text-sm font-semibold text-foreground">
+            🪄 Formato aplicado: {transcription.default_recipe_name || "Formato"}
+          </h3>
+          <div className="mt-3 space-y-3">
+            <MarkdownContent text={transcription.default_recipe_output} className="text-sm text-secondary" />
+            <div className="flex flex-wrap items-center gap-3">
+              <CopyButton
+                text={transcription.default_recipe_output}
+                label="Copiar"
+                ariaLabel={`Copiar el resultado de ${transcription.default_recipe_name || "el formato"} aplicado`}
+              />
+              {defaultRecipeNoteSavedId ? (
+                <Link
+                  href={`/app/t/${defaultRecipeNoteSavedId}`}
+                  className="text-xs font-semibold text-accent hover:underline"
+                >
+                  Guardado ✓ · Ver nota
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={saveDefaultRecipeOutputAsNote}
+                  disabled={savingDefaultRecipeNote}
+                  aria-label="Guardar como nota el resultado del formato aplicado"
+                  className="text-xs font-medium text-tertiary transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingDefaultRecipeNote ? "Guardando…" : "Guardar como nota"}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Chat con IA sobre esta transcripción (MVP por-transcripción, ver ROADMAP.md). Bloqueado
           mientras hay cambios de texto sin guardar — mismo criterio que el botón de Resumen: la IA

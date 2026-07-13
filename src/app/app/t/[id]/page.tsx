@@ -22,9 +22,14 @@ const COLUMNS_WITH_SUMMARY = `${COLUMNS_WITH_TRANSLATION}, summary, summary_sour
 // — mismo criterio de compat, un nivel de cascada más.
 const COLUMNS_WITH_VOCABULARY = `${COLUMNS_WITH_SUMMARY}, vocabulary_corrected`;
 // `tags` (tanda 3 de quick wins — auto-título/auto-tags, ver
-// supabase/migrations/20260711160000_transcription_tags.sql) — columna MÁS NUEVA, mismo criterio de
-// compat, un nivel de cascada más (se pide primero y se pela primero en el fallback de abajo).
+// supabase/migrations/20260711160000_transcription_tags.sql) — mismo criterio de compat, un nivel de
+// cascada más.
 const COLUMNS_WITH_TAGS = `${COLUMNS_WITH_VOCABULARY}, tags`;
+// `default_recipe_output`/`default_recipe_name` (auto-apply del Formato default al transcribir, ver
+// supabase/migrations/20260713130000_transcription_default_recipe.sql) — columnas MÁS NUEVAS, mismo
+// criterio de compat, un nivel de cascada más (se piden primero y se pelan primero en el fallback de
+// abajo).
+const COLUMNS_WITH_DEFAULT_RECIPE = `${COLUMNS_WITH_TAGS}, default_recipe_output, default_recipe_name`;
 
 export default async function TranscriptionPage({
   params,
@@ -37,7 +42,7 @@ export default async function TranscriptionPage({
   const [transcriptionResult, { data: projectsData }, chatMessagesResult] = await Promise.all([
     supabase
       .from("transcriptions")
-      .select(COLUMNS_WITH_TAGS)
+      .select(COLUMNS_WITH_DEFAULT_RECIPE)
       .eq("id", id)
       .is("deleted_at", null)
       .single(),
@@ -64,54 +69,75 @@ export default async function TranscriptionPage({
 
   let t = transcriptionResult.data;
   if (!t && isMissingColumnError(transcriptionResult.error)) {
-    const withVocabulary = await supabase
+    const withTags = await supabase
       .from("transcriptions")
-      .select(COLUMNS_WITH_VOCABULARY)
+      .select(COLUMNS_WITH_TAGS)
       .eq("id", id)
       .is("deleted_at", null)
       .single();
 
-    if (withVocabulary.data) {
-      t = { ...withVocabulary.data, tags: [] };
-    } else if (isMissingColumnError(withVocabulary.error)) {
-      const withSummary = await supabase
+    if (withTags.data) {
+      t = { ...withTags.data, default_recipe_output: null, default_recipe_name: null };
+    } else if (isMissingColumnError(withTags.error)) {
+      const withVocabulary = await supabase
         .from("transcriptions")
-        .select(COLUMNS_WITH_SUMMARY)
+        .select(COLUMNS_WITH_VOCABULARY)
         .eq("id", id)
         .is("deleted_at", null)
         .single();
 
-      if (withSummary.data) {
-        t = { ...withSummary.data, vocabulary_corrected: null, tags: [] };
-      } else if (isMissingColumnError(withSummary.error)) {
-        const withTranslation = await supabase
+      if (withVocabulary.data) {
+        t = { ...withVocabulary.data, tags: [], default_recipe_output: null, default_recipe_name: null };
+      } else if (isMissingColumnError(withVocabulary.error)) {
+        const withSummary = await supabase
           .from("transcriptions")
-          .select(COLUMNS_WITH_TRANSLATION)
+          .select(COLUMNS_WITH_SUMMARY)
           .eq("id", id)
           .is("deleted_at", null)
           .single();
 
-        if (withTranslation.data) {
+        if (withSummary.data) {
           t = {
-            ...withTranslation.data,
-            summary: null,
-            summary_source_hash: null,
+            ...withSummary.data,
             vocabulary_corrected: null,
             tags: [],
+            default_recipe_output: null,
+            default_recipe_name: null,
           };
-        } else if (isMissingColumnError(withTranslation.error)) {
-          const fallback = await supabase.from("transcriptions").select(BASE_COLUMNS).eq("id", id).is("deleted_at", null).single();
-          t = fallback.data
-            ? {
-                ...fallback.data,
-                translated_to: null,
-                original_text: null,
-                summary: null,
-                summary_source_hash: null,
-                vocabulary_corrected: null,
-                tags: [],
-              }
-            : null;
+        } else if (isMissingColumnError(withSummary.error)) {
+          const withTranslation = await supabase
+            .from("transcriptions")
+            .select(COLUMNS_WITH_TRANSLATION)
+            .eq("id", id)
+            .is("deleted_at", null)
+            .single();
+
+          if (withTranslation.data) {
+            t = {
+              ...withTranslation.data,
+              summary: null,
+              summary_source_hash: null,
+              vocabulary_corrected: null,
+              tags: [],
+              default_recipe_output: null,
+              default_recipe_name: null,
+            };
+          } else if (isMissingColumnError(withTranslation.error)) {
+            const fallback = await supabase.from("transcriptions").select(BASE_COLUMNS).eq("id", id).is("deleted_at", null).single();
+            t = fallback.data
+              ? {
+                  ...fallback.data,
+                  translated_to: null,
+                  original_text: null,
+                  summary: null,
+                  summary_source_hash: null,
+                  vocabulary_corrected: null,
+                  tags: [],
+                  default_recipe_output: null,
+                  default_recipe_name: null,
+                }
+              : null;
+          }
         }
       }
     }
