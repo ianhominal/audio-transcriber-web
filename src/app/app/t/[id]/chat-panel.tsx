@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +11,11 @@ import { useToast } from "@/components/ui/Toast";
 import { isValidChatMessageText, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/config";
 import { parseChatErrorMessage } from "@/lib/chat/errors";
 import { getMessageText, shouldRenderMarkdown } from "@/lib/chat/message";
+
+/** Estado de "Guardar como nota" (quick win del brainstorm "Sacar el output afuera", ver
+ * ROADMAP.md) por mensaje — un `Record` keyeado por `message.id` en vez de un booleano único
+ * porque cualquier respuesta del asistente puede guardarse, no solo la última. */
+type SaveNoteState = { status: "idle" | "saving" | "saved" | "error"; noteId?: string };
 
 const SUGGESTIONS = [
   "Resumí esto",
@@ -60,6 +66,38 @@ export function ChatPanel({
 
   const busy = status === "submitted" || status === "streaming";
   const inputDisabled = disabled || busy;
+  const [saveNoteState, setSaveNoteState] = useState<Record<string, SaveNoteState>>({});
+
+  /**
+   * "Guardar como nota" (quick win del brainstorm, ver ROADMAP.md): crea una transcripción
+   * text-only nueva con el contenido de ESTA respuesta del asistente (`POST /api/notes`, ver
+   * `src/lib/notes/chatNote.ts` para cómo se arma el título/tag). Guardado independiente por
+   * mensaje — `saveNoteState` es un mapa, no un booleano único, porque cualquier respuesta puede
+   * guardarse, no solo la última.
+   */
+  async function saveAsNote(message: UIMessage) {
+    const text = getMessageText(message);
+    if (!text.trim() || saveNoteState[message.id]?.status === "saving") return;
+    setSaveNoteState((s) => ({ ...s, [message.id]: { status: "saving" } }));
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveNoteState((s) => ({ ...s, [message.id]: { status: "error" } }));
+        toast(data.error ?? "No se pudo guardar la nota.", "error");
+        return;
+      }
+      setSaveNoteState((s) => ({ ...s, [message.id]: { status: "saved", noteId: data.id } }));
+      toast("Guardado ✓", "success");
+    } catch {
+      setSaveNoteState((s) => ({ ...s, [message.id]: { status: "error" } }));
+      toast("No se pudo contactar al servidor.", "error");
+    }
+  }
 
   function submit(text: string) {
     const trimmed = text.trim();
@@ -154,8 +192,28 @@ export function ChatPanel({
                 ella ya lo escribió). `getMessageText` junta las partes "text" del mensaje, mismo
                 filtro que ya aplica el render de arriba. */}
             {message.role !== "user" && (
-              <div className="mt-1">
+              <div className="mt-1 flex items-center gap-3">
                 <CopyButton text={getMessageText(message)} label="Copiar" ariaLabel="Copiar esta respuesta" size="sm" />
+                {/* "Guardar como nota" (quick win "Sacar el output afuera", ver ROADMAP.md): una
+                    vez guardada, el botón se reemplaza por un link directo a la nota nueva — no
+                    tiene sentido dejar guardar la misma respuesta dos veces seguidas. */}
+                {saveNoteState[message.id]?.status === "saved" ? (
+                  <Link
+                    href={`/app/t/${saveNoteState[message.id]!.noteId}`}
+                    className="text-xs font-semibold text-accent hover:underline"
+                  >
+                    Guardado ✓ · Ver nota
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => saveAsNote(message)}
+                    disabled={saveNoteState[message.id]?.status === "saving"}
+                    className="text-xs font-medium text-tertiary transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saveNoteState[message.id]?.status === "saving" ? "Guardando…" : "Guardar como nota"}
+                  </button>
+                )}
               </div>
             )}
           </div>

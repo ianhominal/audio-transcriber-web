@@ -393,7 +393,11 @@ export function TranscriptionDetail({
               aria-label="Título de la transcripción"
               className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold tracking-tight text-foreground outline-none transition-colors duration-150 ease-out hover:border-border focus:border-accent focus:bg-surface"
             />
-            <p className="mt-0.5 px-0.5 text-xs text-tertiary">🎵 {transcription.audio_name}</p>
+            {/* 📝 en vez de 🎵 para notas text-only (ej. "Guardar como nota" del chat, ver
+                ROADMAP.md) — mostrar un ícono de audio para algo que nunca tuvo audio confundía. */}
+            <p className="mt-0.5 px-0.5 text-xs text-tertiary">
+              {transcription.audio_url ? "🎵" : "📝"} {transcription.audio_name}
+            </p>
           </div>
         </div>
         <span className="shrink-0 pt-2 text-xs text-tertiary">{formatDate(transcription.created_at)}</span>

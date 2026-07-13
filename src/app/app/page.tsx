@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeTagFilter } from "@/lib/tags";
+import { RESURFACE_MIN_AGE_DAYS } from "@/lib/resurface";
 import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { buildProjectBreadcrumb, buildProjectTree, getSubfolders, rollUpProjectCounts } from "@/lib/drive/tree";
@@ -19,6 +20,7 @@ import { NewProjectButton } from "./new-project-button";
 import { NewSubfolderButton } from "./new-subfolder-button";
 import { ProjectHeader } from "./project-header";
 import { ProjectTree } from "./project-tree";
+import { ResurfaceCard } from "./resurface-card";
 import { SubfolderCard } from "./subfolder-card";
 import { TranscriptionRow } from "./transcription-row";
 import { UnassignedProjectLink } from "./unassigned-drop-link";
@@ -179,6 +181,32 @@ async function fetchTranscriptionsCompat(
   return ((fallback.data ?? []) as unknown as Omit<Transcription, "tags">[]).map((t) => ({ ...t, tags: [] }));
 }
 
+type ResurfaceCandidateRow = { id: string; title: string; text: string; audio_name: string; created_at: string };
+
+/**
+ * Candidatas a "resurfacing" (quick win del brainstorm, ver ROADMAP.md — "Mantener vivo el
+ * archivo"): notas propias (RLS), no borradas, con al menos `RESURFACE_MIN_AGE_DAYS` de
+ * antigüedad. Se traen hasta `RESURFACE_CANDIDATE_LIMIT` (ordenadas por las más viejas primero) en
+ * vez de una sola fila para que la selección FINAL pueda vivir en el cliente
+ * (`pickResurfaceCandidate`, ver `resurface-card.tsx`) — el server no sabe qué notas ya se
+ * descartaron en este dispositivo (`localStorage`), así que le pasa un lote chico y el cliente
+ * elige. Ante cualquier error de la query, degrada a `[]` (sin card) — es un widget de
+ * descubrimiento, nunca debe poder romper el dashboard.
+ */
+async function fetchResurfaceCandidates(supabase: SupabaseClient): Promise<ResurfaceCandidateRow[]> {
+  const RESURFACE_CANDIDATE_LIMIT = 10;
+  const cutoff = new Date(Date.now() - RESURFACE_MIN_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("transcriptions")
+    .select("id, title, text, audio_name, created_at")
+    .is("deleted_at", null)
+    .lte("created_at", cutoff)
+    .order("created_at", { ascending: true })
+    .limit(RESURFACE_CANDIDATE_LIMIT);
+  if (error) return [];
+  return (data ?? []) as unknown as ResurfaceCandidateRow[];
+}
+
 export default async function Dashboard({
   searchParams,
 }: {
@@ -188,10 +216,21 @@ export default async function Dashboard({
   const tagFilter = normalizeTagFilter(tagParam);
   const supabase = await createClient();
 
-  const [projects, { data: countRows }, items] = await Promise.all([
+  // Resurfacing solo tiene sentido en la vista "de entrada" del dashboard ("Todas"/"Sin proyecto"),
+  // no navegando dentro de un proyecto/carpeta puntual — mismo criterio de "sutil, no invasivo"
+  // del pedido: no compite por atención con el contenido de una carpeta que la usuaria ya eligió
+  // activamente. Tampoco con un filtro por tag activo (hallazgo LOW del review adversarial): la
+  // candidata de resurfacing no respeta ESE tag, así que mostrarla junto a un "no hay nada acá"
+  // del filtro sería confuso — sugiere una nota que no tiene nada que ver con lo que se está
+  // filtrando. Se evalúa ANTES del fetch de proyectos (no depende de `activeProject`, calculado
+  // más abajo) para poder saltear la query por completo fuera de esta vista.
+  const isTopView = (!filter || filter === "none") && !tagFilter;
+
+  const [projects, { data: countRows }, items, resurfaceCandidates] = await Promise.all([
     fetchProjectsCompat(supabase),
     supabase.from("transcriptions").select("project_id").is("deleted_at", null),
     fetchTranscriptionsCompat(supabase, filter, tagFilter),
+    isTopView ? fetchResurfaceCandidates(supabase) : Promise.resolve([]),
   ]);
 
   // Conteos por proyecto + "sin proyecto" + total.
@@ -357,6 +396,7 @@ export default async function Dashboard({
           </>
         ) : (
           <>
+            <ResurfaceCard candidates={resurfaceCandidates} />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
               <Link href={newHref} className={buttonClasses({ size: "md" })}>
