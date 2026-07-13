@@ -59,6 +59,17 @@ export const CHAT_DAILY_LIMIT = 60;
  */
 export const TITLE_TAGS_DAILY_LIMIT = 100;
 
+/**
+ * Tope de aplicaciones de formato (llamadas reales a Groq, `kind: "recipe"`) por usuario/día — cuarto
+ * trigger `BEFORE INSERT` independiente sobre `ai_usage_log` (ver migración
+ * `20260713120000_ai_recipes.sql`, función `enforce_ai_usage_recipe_limit`). "Aplicar formato" es a
+ * pedido MANUAL como el chat (`CHAT_DAILY_LIMIT`), pero con una salida en promedio más larga/costosa
+ * (un brief de producción completo, una escaleta) que un mensaje de chat típico — por eso el número
+ * queda por debajo de `CHAT_DAILY_LIMIT` y bien por debajo de `TITLE_TAGS_DAILY_LIMIT` (que es
+ * automático y de salida corta). DEBE coincidir con el número hardcodeado en el trigger.
+ */
+export const AI_RECIPE_DAILY_LIMIT = 50;
+
 // Tokens estables que raise-ea el trigger BEFORE INSERT (ver migración). Se detectan por substring
 // en el mensaje del error de PostgREST — mismo mecanismo que `isTermLimitError` en
 // `src/lib/vocabulary/store.ts`, elegido a propósito para no depender del SQLSTATE (que PostgREST no
@@ -67,6 +78,7 @@ const SUMMARY_DAILY_LIMIT_TOKEN = "ai_summary_daily_limit_reached";
 const SUMMARY_FORCE_LIMIT_TOKEN = "ai_summary_force_daily_limit_reached";
 const CHAT_DAILY_LIMIT_TOKEN = "ai_chat_daily_limit_reached";
 const TITLE_TAGS_DAILY_LIMIT_TOKEN = "ai_title_tags_daily_limit_reached";
+const RECIPE_DAILY_LIMIT_TOKEN = "ai_recipe_daily_limit_reached";
 
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite DIARIO total. */
 export function isAiSummaryDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
@@ -87,4 +99,10 @@ export function isAiChatDailyLimitError(error: { message?: unknown } | null | un
  * TÍTULO+TAGS (`kind: "title_tags"`, ver paso 2.7 de `/api/transcribe`). */
 export function isAiTitleTagsDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
   return !!error && typeof error.message === "string" && error.message.includes(TITLE_TAGS_DAILY_LIMIT_TOKEN);
+}
+
+/** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite diario de
+ * FORMATOS aplicados (`kind: "recipe"`, ver `/api/recipes/apply`). */
+export function isAiRecipeDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
+  return !!error && typeof error.message === "string" && error.message.includes(RECIPE_DAILY_LIMIT_TOKEN);
 }

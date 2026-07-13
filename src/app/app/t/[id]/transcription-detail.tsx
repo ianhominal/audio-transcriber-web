@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { UIMessage } from "ai";
 import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
 import { buildNoteMarkdown, buildNotePlainText, summaryToMarkdown } from "@/lib/noteExport";
@@ -26,6 +27,7 @@ import { qualityLabel } from "@/lib/transcribe/model";
 import { languageLabel } from "@/lib/settings/validate";
 import { canSummarizeText } from "@/lib/summary/validate";
 import type { SummaryResult } from "@/lib/summary/format";
+import type { AiRecipe } from "@/lib/recipes/types";
 import { ChatPanel } from "./chat-panel";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
@@ -118,6 +120,41 @@ export function TranscriptionDetail({
   const [summary, setSummary] = useState(initialSummary);
   const [summaryText, setSummaryText] = useState(summaryStale ? null : transcription.text);
   const [summarizing, setSummarizing] = useState(false);
+  // "Aplicar formato" (ver brief "Formatos" 2026-07-13). A diferencia del resumen/chat (historial
+  // resuelto server-side en `page.tsx`), la lista de formatos se trae client-side al montar: es un
+  // fetch chico e independiente (no bloquea el render inicial de la nota) y evita tener que resolver
+  // `user.id` en el server component solo para esto (`page.tsx` hoy no lo necesita para nada más).
+  const [recipes, setRecipes] = useState<AiRecipe[]>([]);
+  const [recipesLoaded, setRecipesLoaded] = useState(false);
+  const [selectedRecipeId, setSelectedRecipeId] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [applyOutput, setApplyOutput] = useState("");
+  const [applyDone, setApplyDone] = useState(false);
+  const [savingApplyNote, setSavingApplyNote] = useState(false);
+  const [applyNoteSavedId, setApplyNoteSavedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/recipes");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const list = (data.recipes ?? []) as AiRecipe[];
+        setRecipes(list);
+        const defaultRecipe = list.find((r) => r.isDefault);
+        setSelectedRecipeId(defaultRecipe?.id ?? list[0]?.id ?? "");
+      } catch {
+        // Best-effort: sin formatos disponibles la tarjeta queda vacía, no rompe el resto del detalle.
+      } finally {
+        if (!cancelled) setRecipesLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Menú "Exportar": portal a `document.body` + clampeo al viewport (mismo patrón que `IconMenu`,
   // extraído a `useViewportClamp`) — antes era `absolute left-0 w-64` sin clamp, así que en
   // pantallas angostas (~360-390px) se salía por el borde derecho.
@@ -218,6 +255,71 @@ export function TranscriptionDetail({
       toast("No se pudo contactar al servidor.", "error");
     } finally {
       setSummarizing(false);
+    }
+  }
+
+  /**
+   * Aplica el formato elegido a esta transcripción — lee la respuesta en streaming (texto plano,
+   * `/api/recipes/apply`, ver comentario del route) y la va renderizando a medida que llega, mismo
+   * criterio de feedback progresivo que el chat (`useChat`), pero acá manual porque no es un mensaje
+   * de chat: es un resultado único que se muestra en la tarjeta.
+   */
+  async function applyRecipe() {
+    if (!selectedRecipeId || applying || dirty) return;
+    setApplying(true);
+    setApplyOutput("");
+    setApplyDone(false);
+    setApplyNoteSavedId(null);
+    try {
+      const res = await fetch("/api/recipes/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcriptionId: transcription.id, recipeId: selectedRecipeId }),
+      });
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        toast(data.error ?? "No se pudo aplicar el formato.", "error");
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setApplyOutput(acc);
+      }
+      setApplyDone(true);
+    } catch {
+      toast("No se pudo contactar al servidor.", "error");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  /** "Guardar como nota" del resultado del formato — mismo endpoint/shape que usa el chat
+   * (`POST /api/notes`, ver `chat-panel.tsx`). */
+  async function saveApplyOutputAsNote() {
+    if (!applyOutput.trim() || savingApplyNote) return;
+    setSavingApplyNote(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: applyOutput }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error ?? "No se pudo guardar la nota.", "error");
+        return;
+      }
+      setApplyNoteSavedId(data.id);
+      toast("Guardado ✓", "success");
+    } catch {
+      toast("No se pudo contactar al servidor.", "error");
+    } finally {
+      setSavingApplyNote(false);
     }
   }
 
@@ -578,6 +680,80 @@ export function TranscriptionDetail({
                 </div>
               )}
               <CopyButton text={summaryToMarkdown(summary)} label="Copiar resumen" ariaLabel="Copiar el resumen" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Aplicar formato (ver brief "Formatos" 2026-07-13): instrucciones reutilizables guardadas en
+          Ajustes → Formatos, aplicadas con un click a esta nota. Mismo patrón visual de tarjeta que
+          "Resumen con IA" — bloqueada mientras hay cambios sin guardar, mismo criterio que ese botón
+          y que el chat (la IA siempre trabaja sobre el texto GUARDADO, nunca sobre un borrador). */}
+      <div className="mt-5 rounded-xl border border-border-strong bg-surface p-4">
+        <h3 className="text-sm font-semibold text-foreground">🪄 Aplicar formato</h3>
+
+        {recipesLoaded && recipes.length === 0 ? (
+          <p className="mt-2 text-xs text-tertiary">
+            Todavía no creaste ningún formato. Creá uno en Ajustes para poder aplicarlo acá.
+          </p>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              value={selectedRecipeId}
+              onChange={(e) => setSelectedRecipeId(e.target.value)}
+              disabled={applying || dirty || recipes.length === 0}
+              aria-label="Elegir formato"
+              className="min-w-0 flex-1 rounded-lg border border-border-strong px-2.5 py-1.5 text-sm focus:border-accent disabled:opacity-60"
+            >
+              {recipes.map((recipe) => (
+                <option key={recipe.id} value={recipe.id}>
+                  {recipe.isDefault ? "⭐ " : ""}
+                  {recipe.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={applying}
+              disabled={applying || dirty || !selectedRecipeId}
+              title={dirty ? "Guardá los cambios de texto antes de aplicar un formato." : undefined}
+              onClick={applyRecipe}
+            >
+              {applying ? "Generando…" : "Aplicar"}
+            </Button>
+          </div>
+        )}
+
+        {/* Región viva, mismo criterio que el panel de Resumen: se anuncia cuándo empieza a generar
+            y cuándo aparece el resultado, sin que la usuaria tenga que ir a buscarlo. */}
+        <div role="status" aria-live="polite">
+          {applying && !applyOutput && <p className="mt-2 text-xs text-tertiary">Generando…</p>}
+          {applyOutput && (
+            <div className="mt-3 space-y-3">
+              <MarkdownContent text={applyOutput} className="text-sm text-secondary" />
+              {applyDone && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <CopyButton text={applyOutput} label="Copiar" ariaLabel="Copiar el resultado del formato" />
+                  {applyNoteSavedId ? (
+                    <Link
+                      href={`/app/t/${applyNoteSavedId}`}
+                      className="text-xs font-semibold text-accent hover:underline"
+                    >
+                      Guardado ✓ · Ver nota
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={saveApplyOutputAsNote}
+                      disabled={savingApplyNote}
+                      className="text-xs font-medium text-tertiary transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingApplyNote ? "Guardando…" : "Guardar como nota"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

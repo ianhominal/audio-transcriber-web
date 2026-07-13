@@ -4,6 +4,7 @@ import {
   isAiSummaryForceLimitError,
   isAiChatDailyLimitError,
   isAiTitleTagsDailyLimitError,
+  isAiRecipeDailyLimitError,
 } from "./aiUsage";
 
 describe("isAiSummaryDailyLimitError / isAiSummaryForceLimitError", () => {
@@ -80,5 +81,32 @@ describe("isAiTitleTagsDailyLimitError", () => {
     expect(isAiTitleTagsDailyLimitError(undefined)).toBe(false);
     expect(isAiTitleTagsDailyLimitError({})).toBe(false);
     expect(isAiTitleTagsDailyLimitError({ message: 42 })).toBe(false);
+  });
+});
+
+describe("isAiRecipeDailyLimitError", () => {
+  it("detecta el token del límite diario de formatos en el mensaje del trigger", () => {
+    expect(isAiRecipeDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(true);
+    expect(
+      isAiRecipeDailyLimitError({ message: "error: ai_recipe_daily_limit_reached (PL/pgSQL function ...)" })
+    ).toBe(true);
+  });
+
+  it("NO confunde el token de formatos con los de resumen/chat/título+tags y viceversa", () => {
+    expect(isAiRecipeDailyLimitError({ message: "ai_summary_daily_limit_reached" })).toBe(false);
+    expect(isAiRecipeDailyLimitError({ message: "ai_summary_force_daily_limit_reached" })).toBe(false);
+    expect(isAiRecipeDailyLimitError({ message: "ai_chat_daily_limit_reached" })).toBe(false);
+    expect(isAiRecipeDailyLimitError({ message: "ai_title_tags_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+    expect(isAiSummaryForceLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+    expect(isAiChatDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+    expect(isAiTitleTagsDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isAiRecipeDailyLimitError(null)).toBe(false);
+    expect(isAiRecipeDailyLimitError(undefined)).toBe(false);
+    expect(isAiRecipeDailyLimitError({})).toBe(false);
+    expect(isAiRecipeDailyLimitError({ message: 42 })).toBe(false);
   });
 });

@@ -5,10 +5,12 @@ import { getDriveConnectionStatusCompat } from "@/lib/drive/connection-status-co
 import { getUserSettings } from "@/lib/settings/user-settings";
 import { listVocabularyTerms } from "@/lib/vocabulary/store";
 import { listMcpTokens } from "@/lib/mcp-tokens/store";
+import { listRecipes } from "@/lib/recipes/store";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DriveFolderConnect } from "./drive-folder-connect";
 import { TranscriptionDefaultsSection } from "./transcription-defaults";
 import { VocabularySection } from "./vocabulary-section";
+import { FormatosSection } from "./formatos-section";
 import { MCPTokensSection } from "./mcp-tokens-section";
 
 const DRIVE_STATUS_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
@@ -43,14 +45,15 @@ export default async function AjustesPage({
   // y `src/lib/drive/connection-status-compat.ts` (degrada a 'active' si la migración no corrió).
   // Independent of the transcription defaults, vocabulary, and MCP tokens fetches below — all
   // fetched in parallel, not chained.
-  const [connectionStatus, transcriptionDefaults, vocabularyTerms, mcpTokens] = user
+  const [connectionStatus, transcriptionDefaults, vocabularyTerms, mcpTokens, aiRecipes] = user
     ? await Promise.all([
         getDriveConnectionStatusCompat(supabase, user.id),
         getUserSettings(supabase, user.id),
         listVocabularyTerms(supabase, user.id),
         listMcpTokens(supabase, user.id),
+        listRecipes(supabase, user.id),
       ])
-    : [null, null, [], []];
+    : [null, null, [], [], []];
   const isConnected = connectionStatus !== null;
   const isRevoked = connectionStatus === "revoked";
 
@@ -127,6 +130,12 @@ export default async function AjustesPage({
       {user && (
         <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
           <VocabularySection initialTerms={vocabularyTerms} />
+        </section>
+      )}
+
+      {user && (
+        <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+          <FormatosSection initialRecipes={aiRecipes} />
         </section>
       )}
 
