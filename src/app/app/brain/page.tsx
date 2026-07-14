@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { BrainChat } from "./brain-chat";
+import { ChatPanel } from "@/components/app/chat-panel";
 
 /**
- * "Segundo cerebro" (feature 2026-07-13, see brief): página dedicada al chat con IA sobre TODAS las
- * notas del usuario. Server component mínimo — auth ya la resuelve `AppLayout` (`src/app/app/layout.tsx`,
- * redirige a `/login` sin sesión); no hace falta traer datos acá porque `BrainChat` (client) habla
- * directo con `/api/brain`, que hace su propio retrieval scopeado por dueño (ver ese route).
+ * "Chat con IA" en scope "Todas mis notas" (antes "Segundo cerebro", unificado en un solo
+ * componente — ver `ChatPanel`, `src/lib/chat/scope.ts`). Server component mínimo — auth ya la
+ * resuelve `AppLayout` (`src/app/app/layout.tsx`, redirige a `/login` sin sesión); no hace falta
+ * traer datos acá porque `ChatPanel` (client) habla directo con `/api/brain`, que hace su propio
+ * retrieval scopeado por dueño (ver ese route). Sin `transcriptionId`: `ChatPanel` queda fijo en
+ * scope "all" y no muestra el selector de alcance (esta página no tiene contexto de nota).
  */
 export default function BrainPage() {
   return (
@@ -18,14 +20,10 @@ export default function BrainPage() {
       </Link>
 
       <div className="mt-3 mb-5">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">🧠 Segundo cerebro</h1>
-        <p className="mt-1 text-sm text-secondary">
-          Preguntale a la IA sobre todas tus notas: pedile que junte ideas repartidas en varias
-          transcripciones, que te recuerde qué dijiste sobre un tema, o que busque tareas pendientes.
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Chat con IA</h1>
       </div>
 
-      <BrainChat />
+      <ChatPanel defaultScope="all" />
     </div>
   );
 }

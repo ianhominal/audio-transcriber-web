@@ -28,7 +28,7 @@ import { languageLabel } from "@/lib/settings/validate";
 import { canSummarizeText } from "@/lib/summary/validate";
 import type { SummaryResult } from "@/lib/summary/format";
 import type { AiRecipe } from "@/lib/recipes/types";
-import { ChatPanel } from "./chat-panel";
+import { ChatPanel } from "@/components/app/chat-panel";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
 
@@ -717,7 +717,7 @@ export function TranscriptionDetail({
       {/* Resumen con IA (Fase F5) */}
       <div className="mt-5 rounded-xl border border-border-strong bg-surface p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">✨ Resumen con IA</h3>
+          <h3 className="text-sm font-semibold text-foreground">Resumen con IA</h3>
           <Button
             variant="secondary"
             size="sm"
@@ -796,7 +796,7 @@ export function TranscriptionDetail({
           "Resumen con IA" — bloqueada mientras hay cambios sin guardar, mismo criterio que ese botón
           y que el chat (la IA siempre trabaja sobre el texto GUARDADO, nunca sobre un borrador). */}
       <div className="mt-5 rounded-xl border border-border-strong bg-surface p-4">
-        <h3 className="text-sm font-semibold text-foreground">🪄 Aplicar formato</h3>
+        <h3 className="text-sm font-semibold text-foreground">Aplicar formato</h3>
 
         {recipesLoaded && recipes.length === 0 ? (
           <p className="mt-2 text-xs text-tertiary">

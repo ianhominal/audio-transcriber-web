@@ -127,7 +127,7 @@ export function MergeView({
 
   return (
     <div className="mt-3" data-project-id={projectId}>
-      <h1 className="text-2xl font-bold tracking-tight text-foreground">🧵 Unir en un documento</h1>
+      <h1 className="text-2xl font-bold tracking-tight text-foreground">Unir en un documento</h1>
 
       <div className="mt-4 rounded-xl border border-border-strong bg-surface p-4">
         <p className="text-sm font-semibold text-foreground">

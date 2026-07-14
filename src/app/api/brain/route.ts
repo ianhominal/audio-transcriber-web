@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
   if (usageLogErr) {
     if (isAiBrainDailyLimitError(usageLogErr)) {
       return NextResponse.json(
-        { error: "Llegaste al límite diario de preguntas al Segundo cerebro. Probá mañana." },
+        { error: "Llegaste al límite diario de preguntas al Chat con IA sobre todas tus notas. Probá mañana." },
         { status: 429 }
       );
     }
