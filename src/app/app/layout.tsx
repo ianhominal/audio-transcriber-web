@@ -27,11 +27,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <nav className="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="Cuenta">
               <Link
                 href="/app/brain"
-                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
               >
-                <span aria-hidden="true">
+                <span aria-hidden="true" className="flex shrink-0">
                   <ChatIcon />
-                </span>{" "}
+                </span>
                 <span className="hidden sm:inline">Chat con IA</span>
               </Link>
               <Link
