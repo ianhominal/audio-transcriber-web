@@ -6,6 +6,7 @@ import { listVocabularyTerms } from "@/lib/vocabulary/store";
 import { isAiPolishDailyLimitError } from "@/lib/aiUsage";
 import { buildPolishCall } from "@/lib/polish/prompt";
 import { joinPolished, MAX_POLISH_INPUT_CHARS, splitForPolish } from "@/lib/polish/chunk";
+import { joinSpeakerBlocks, type SpeakerBlock, splitSpeakerBlocks } from "@/lib/polish/speakers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -175,38 +176,58 @@ export async function POST(req: NextRequest) {
     // 42P01: `ai_usage_log` todavía sin migrar — degrada sin cap (ventana de rollout).
   }
 
-  // 4) Partir en pedazos y pulir cada uno SECUENCIALMENTE (ver doc del route). Un pedazo que falla
-  //    NUNCA se pierde: se conserva su texto ORIGINAL sin pulir y se sigue con el resto — el usuario
-  //    se lleva como mínimo lo que ya tenía, nunca menos.
-  const chunks = splitForPolish(text);
-  const resultChunks: string[] = [];
+  // 4) Pulir. Un pedazo que falla NUNCA se pierde: se conserva su texto ORIGINAL sin pulir y se
+  //    sigue con el resto — el usuario se lleva como mínimo lo que ya tenía, nunca menos.
   const chunkErrors: string[] = [];
   let polishedCount = 0;
+  let totalCount = 0;
 
-  for (const chunk of chunks) {
-    const result = await polishChunk(chunk, terms, apiKey);
-    if (result.ok) {
-      resultChunks.push(result.text);
-      polishedCount++;
-    } else {
-      console.error("[polish] chunk failed, keeping original text for that chunk", {
-        userId: user.id,
-        error: result.error,
-      });
-      chunkErrors.push(result.error);
-      resultChunks.push(chunk);
+  /** Pule un texto largo partiéndolo en pedazos (ver `splitForPolish`), secuencial. */
+  const polishLongText = async (input: string): Promise<string> => {
+    const chunks = splitForPolish(input);
+    const out: string[] = [];
+    for (const chunk of chunks) {
+      totalCount++;
+      const result = await polishChunk(chunk, terms, apiKey);
+      if (result.ok) {
+        out.push(result.text);
+        polishedCount++;
+      } else {
+        console.error("[polish] chunk failed, keeping original text for that chunk", {
+          userId: user.id,
+          error: result.error,
+        });
+        chunkErrors.push(result.error);
+        out.push(chunk);
+      }
     }
+    return joinPolished(out);
+  };
+
+  // Transcripción con hablantes ("Persona 1: …", ver `splitSpeakerBlocks`): se pule SOLO el texto de
+  // cada turno y las etiquetas se re-adjuntan acá, sin pasar jamás por el modelo. Pedirle al LLM
+  // "conservá las etiquetas" sería un pedido, no una garantía: reorganiza, fusiona turnos y
+  // renombra. Lo que no se puede perder, no se manda.
+  const speakerBlocks = splitSpeakerBlocks(text);
+  let finalText: string;
+
+  if (speakerBlocks) {
+    const polishedBlocks: SpeakerBlock[] = [];
+    for (const block of speakerBlocks) {
+      polishedBlocks.push({ label: block.label, text: await polishLongText(block.text) });
+    }
+    finalText = joinSpeakerBlocks(polishedBlocks);
+  } else {
+    finalText = await polishLongText(text);
   }
 
   // Un solo evento de Sentry por request (no uno por pedazo fallido): una transcripción larga puede
   // tener varias decenas de pedazos y no aporta nada generar ese mismo múltiplo de eventos.
   if (chunkErrors.length > 0) {
-    Sentry.captureException(new Error(`polish: ${chunkErrors.length}/${chunks.length} chunks failed`), {
+    Sentry.captureException(new Error(`polish: ${chunkErrors.length}/${totalCount} chunks failed`), {
       extra: { userId: user.id, transcriptionId: transcriptionId || null, firstError: chunkErrors[0] },
     });
   }
-
-  const finalText = joinPolished(resultChunks);
 
   // 5) Persistir (si vino `transcriptionId`) — best-effort, mismo criterio que `/api/summarize`: si
   //    el UPDATE falla, el texto pulido SIGUE llegando al usuario en la respuesta (nunca se pierde
@@ -232,5 +253,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ text: finalText, polishedChunks: polishedCount, totalChunks: chunks.length });
+  return NextResponse.json({ text: finalText, polishedChunks: polishedCount, totalChunks: totalCount });
 }
