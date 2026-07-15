@@ -945,7 +945,10 @@ export function TranscriptionDetail({
         className="mt-5 w-full resize-y rounded-xl border border-border-strong p-4 text-foreground focus:border-accent focus:outline-none"
       />
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* Sticky action bar: the primary actions (Save/Copy/Export/Delete) used to sit at the very
+          bottom of a long page, only reachable after scrolling past every AI card. Keeping the bar
+          pinned to the bottom of the viewport makes them reachable from anywhere on the note. */}
+      <div className="sticky bottom-3 z-10 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/95 p-2 shadow-lg backdrop-blur">
         <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>
           {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
         </Button>
@@ -987,6 +990,7 @@ export function TranscriptionDetail({
                 // todos los popovers porteados de la app.
                 className="z-50 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
               >
+                <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-tertiary">Descargar</p>
                 <button
                   role="menuitem"
                   onClick={exportMarkdown}
@@ -1017,6 +1021,8 @@ export function TranscriptionDetail({
                 >
                   {exportingPdf ? <Spinner size="xs" /> : <Icon name="note" className="shrink-0" />} {exportingPdf ? "Exportando…" : "Nota completa (.pdf)"}
                 </button>
+                <div className="my-1 border-t border-border" role="separator" />
+                <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-tertiary">Enviar a la nube</p>
                 <button
                   role="menuitem"
                   onClick={exportDrive}

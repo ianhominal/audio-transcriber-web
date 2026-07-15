@@ -364,10 +364,10 @@ export default async function Dashboard({
             />
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <NewSubfolderButton parentId={activeProject.id} available={subfoldersAvailable} />
-              <Link href={newHref} className={buttonClasses({ size: "sm" })}>
+              <Link href={newHref} className={buttonClasses({ size: "md" })}>
                 <Icon name="mic" /> Nueva transcripción
               </Link>
+              <NewSubfolderButton parentId={activeProject.id} available={subfoldersAvailable} />
               {/* "Merge several notes into one document" (feature 2026-07-13): only makes sense with
                   at least 2 DIRECT notes in this project/folder — same per-project navigation
                   criteria (`?project=<id>`) as the rest of the dashboard, see
@@ -433,7 +433,7 @@ export default async function Dashboard({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
               <Link href={newHref} className={buttonClasses({ size: "md" })}>
-                <Icon name="plus" /> Nueva transcripción
+                <Icon name="mic" /> Nueva transcripción
               </Link>
             </div>
 
@@ -445,7 +445,7 @@ export default async function Dashboard({
                 description="Grabá tu voz, capturá una reunión o subí un audio y va a aparecer en esta lista."
                 action={
                   <>
-                    <Link href={newHref} className={buttonClasses({ size: "sm" })}>
+                    <Link href="/app/capturar" className={buttonClasses({ size: "sm" })}>
                       <Icon name="mic" /> Grabar
                     </Link>
                     <Link href={newHref} className={buttonClasses({ variant: "secondary", size: "sm" })}>

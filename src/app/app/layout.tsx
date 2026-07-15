@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ToastProvider } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
+import { buttonClasses } from "@/components/ui/Button";
 import { InstallPrompt } from "@/components/install-prompt";
 import LogoutButton from "./logout-button";
 
@@ -26,6 +27,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <span>Audio Transcriber</span>
             </Link>
             <nav className="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="Cuenta">
+              {/* Frictionless one-tap recorder: the ICP records solo voice notes, so this is the
+                  primary action and gets a permanent, prominent home in the header. */}
+              <Link href="/app/capturar" className={buttonClasses({ size: "sm" }) + " mr-1"}>
+                <Icon name="mic" /> Grabar
+              </Link>
               <Link
                 href="/app/brain"
                 className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
