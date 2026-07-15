@@ -7,6 +7,7 @@ import {
   isAiRecipeDailyLimitError,
   isAiMergeDailyLimitError,
   isAiBrainDailyLimitError,
+  isAiPolishDailyLimitError,
 } from "./aiUsage";
 
 describe("isAiSummaryDailyLimitError / isAiSummaryForceLimitError", () => {
@@ -159,5 +160,28 @@ describe("isAiBrainDailyLimitError", () => {
     expect(isAiBrainDailyLimitError(undefined)).toBe(false);
     expect(isAiBrainDailyLimitError({})).toBe(false);
     expect(isAiBrainDailyLimitError({ message: 42 })).toBe(false);
+  });
+});
+
+describe("isAiPolishDailyLimitError", () => {
+  it("detecta el token del límite diario de pulido en el mensaje del trigger", () => {
+    expect(isAiPolishDailyLimitError({ message: "ai_polish_daily_limit_reached" })).toBe(true);
+    expect(
+      isAiPolishDailyLimitError({ message: "error: ai_polish_daily_limit_reached (PL/pgSQL function ...)" })
+    ).toBe(true);
+  });
+
+  it("NO confunde el token de pulido con los demás y viceversa", () => {
+    expect(isAiPolishDailyLimitError({ message: "ai_recipe_daily_limit_reached" })).toBe(false);
+    expect(isAiPolishDailyLimitError({ message: "ai_brain_daily_limit_reached" })).toBe(false);
+    expect(isAiRecipeDailyLimitError({ message: "ai_polish_daily_limit_reached" })).toBe(false);
+    expect(isAiBrainDailyLimitError({ message: "ai_polish_daily_limit_reached" })).toBe(false);
+  });
+
+  it("devuelve false sin lanzar ante error null/undefined/con forma inesperada", () => {
+    expect(isAiPolishDailyLimitError(null)).toBe(false);
+    expect(isAiPolishDailyLimitError(undefined)).toBe(false);
+    expect(isAiPolishDailyLimitError({})).toBe(false);
+    expect(isAiPolishDailyLimitError({ message: 42 })).toBe(false);
   });
 });

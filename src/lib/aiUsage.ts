@@ -103,6 +103,15 @@ const TITLE_TAGS_DAILY_LIMIT_TOKEN = "ai_title_tags_daily_limit_reached";
 const RECIPE_DAILY_LIMIT_TOKEN = "ai_recipe_daily_limit_reached";
 const MERGE_DAILY_LIMIT_TOKEN = "ai_merge_daily_limit_reached";
 const BRAIN_DAILY_LIMIT_TOKEN = "ai_brain_daily_limit_reached";
+// `kind: "polish"` (ver `/api/polish`, pulido de transcripciones largas/ya transcriptas): a
+// diferencia de los `kind` de arriba, HOY no existe ningún trigger `BEFORE INSERT` en la DB para
+// este token — nadie lo agregó todavía (no hace falta migración para esta feature). Esta constante y
+// el detector de abajo son forward-compatible a propósito: si en el futuro se agrega un trigger
+// `enforce_ai_usage_polish_limit` (mismo patrón que `enforce_ai_usage_recipe_limit`), el route ya
+// sabe traducirlo a un 429 amigable sin tocar código. Mientras no exista, este token nunca aparece en
+// un error real — el INSERT de `kind: "polish"` simplemente pasa sin límite (ver comentario de
+// `enforce_ai_usage_summary_limit`: "otros kind (futuros) pasan sin límite hasta que se decida uno").
+const POLISH_DAILY_LIMIT_TOKEN = "ai_polish_daily_limit_reached";
 
 /** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite DIARIO total. */
 export function isAiSummaryDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
@@ -141,4 +150,13 @@ export function isAiMergeDailyLimitError(error: { message?: unknown } | null | u
  * preguntas al "Segundo cerebro" (`kind: "brain"`, ver `/api/brain`). */
 export function isAiBrainDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
   return !!error && typeof error.message === "string" && error.message.includes(BRAIN_DAILY_LIMIT_TOKEN);
+}
+
+/** true si el error del INSERT en `ai_usage_log` es el rechazo del trigger por límite diario de
+ * PULIDO de transcripciones (`kind: "polish"`, ver `/api/polish`). Ver comentario de
+ * `POLISH_DAILY_LIMIT_TOKEN`: hoy no hay ningún trigger que lo dispare, así que en la práctica esta
+ * función nunca devuelve `true` — existe para que `/api/polish` ya maneje ese caso correctamente el
+ * día que se agregue el trigger, sin tener que volver a tocar el route. */
+export function isAiPolishDailyLimitError(error: { message?: unknown } | null | undefined): boolean {
+  return !!error && typeof error.message === "string" && error.message.includes(POLISH_DAILY_LIMIT_TOKEN);
 }

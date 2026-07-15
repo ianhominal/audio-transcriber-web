@@ -116,6 +116,9 @@ export function TranscriptionDetail({
   const [tags, setTags] = useState(transcription.tags);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  // "Mejorar texto" (pulido con IA vía /api/polish, ver ROADMAP.md): estado propio, mismo criterio
+  // que `saving` — un booleano simple, sin compartir flag con ninguna otra acción de esta pantalla.
+  const [polishing, setPolishing] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
   // Export a .docx/.pdf (ver brief "Exportar Word/PDF" 2026-07-13): mismo criterio que
@@ -248,6 +251,46 @@ export function TranscriptionDetail({
       router.refresh(); // refresca la lista/título en el resto de la app
     } else {
       toast(res.error ?? "No se pudo guardar.", "error");
+    }
+  }
+
+  /**
+   * Pule el texto con IA (agrega puntuación/párrafos y corrige con el vocabulario custom, vía
+   * `/api/polish`) — pensado para transcripciones que llegaron de un Whisper local sin ningún
+   * post-proceso, pero funciona sobre cualquier texto ya guardado. Bloqueado mientras hay cambios
+   * sin guardar (`dirty`), mismo criterio que Resumen/Aplicar formato/Chat: la IA siempre trabaja
+   * sobre el texto GUARDADO, nunca sobre un borrador — acá importa el doble, porque el resultado se
+   * persiste directo en `transcriptions.text` del lado del servidor.
+   */
+  async function polishTranscriptionText() {
+    if (!text.trim() || dirty || polishing) return;
+    setPolishing(true);
+    try {
+      const res = await fetch("/api/polish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, transcriptionId: transcription.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error ?? "No se pudo pulir el texto.", "error");
+        return;
+      }
+      // No se toca `baseline` a propósito: el server ya guardó el resultado si pudo, pero dejar
+      // "Guardar" habilitado acá es la única red de seguridad si ese guardado hubiera fallado en
+      // silencio — un clic de más ahí es inofensivo (reescribe lo mismo que ya quedó persistido).
+      setText(data.text);
+      if (data.polishedChunks === 0) {
+        toast("No se pudo pulir el texto, quedó igual que antes.", "error");
+      } else if (data.polishedChunks < data.totalChunks) {
+        toast("El texto se pulió parcialmente: algunas partes quedaron igual que el original.", "info");
+      } else {
+        toast("Texto pulido.", "success");
+      }
+    } catch {
+      toast("No se pudo contactar al servidor.", "error");
+    } finally {
+      setPolishing(false);
     }
   }
 
@@ -737,6 +780,22 @@ export function TranscriptionDetail({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>
           {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
+        </Button>
+        <Button
+          variant="secondary"
+          loading={polishing}
+          disabled={polishing || !text.trim() || dirty}
+          title={
+            !text.trim()
+              ? "No hay texto para mejorar."
+              : dirty
+                ? "Guardá los cambios de texto antes de mejorar el texto."
+                : undefined
+          }
+          onClick={polishTranscriptionText}
+        >
+          {!polishing && <Icon name="sparkles" className="shrink-0" />}
+          {polishing ? "Puliendo…" : "Mejorar texto"}
         </Button>
         <CopyButton text={text} label="Copiar" ariaLabel="Copiar la transcripción completa" size="md" />
         <Button variant="secondary" onClick={download}>
