@@ -725,6 +725,107 @@ export function TranscriptionDetail({
         </div>
       )}
 
+      {/* Texto editable */}
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={14}
+        aria-label="Texto de la transcripción"
+        className="mt-5 w-full resize-y rounded-xl border border-border-strong p-4 text-foreground focus:border-accent focus:outline-none"
+      />
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>
+          {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
+        </Button>
+        <CopyButton text={text} label="Copiar" ariaLabel="Copiar la transcripción completa" size="md" />
+        <Button variant="secondary" onClick={download}>
+          Descargar .txt
+        </Button>
+        {audioSrc && (
+          <Button variant="secondary" onClick={downloadAudio}>
+            Descargar audio
+          </Button>
+        )}
+        <div className="relative">
+          <button
+            ref={exportTriggerRef}
+            type="button"
+            onClick={() => setExportOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={exportOpen}
+            className={buttonClasses({ variant: "secondary" })}
+          >
+            Exportar
+            <Icon name="chevron-down" className="shrink-0" />
+          </button>
+          {exportOpen &&
+            createPortal(
+              <div
+                ref={exportPanelRef}
+                role="menu"
+                style={{
+                  position: "fixed",
+                  top: exportCoords?.top ?? -9999,
+                  left: exportCoords?.left ?? -9999,
+                  width: EXPORT_MENU_WIDTH,
+                  visibility: exportCoords ? "visible" : "hidden",
+                }}
+                // z-50: mismo nivel que IconMenu/EmojiPicker (ver jerarquía en
+                // `components/ui/Modal.tsx`), para mantener una escala de z-index coherente entre
+                // todos los popovers porteados de la app.
+                className="z-50 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+              >
+                <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-tertiary">Descargar</p>
+                <button
+                  role="menuitem"
+                  onClick={exportMarkdown}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
+                >
+                  <Icon name="file-md" className="shrink-0" /> Obsidian / Markdown (.md)
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportNoteMarkdown}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
+                >
+                  <Icon name="note" className="shrink-0" /> Nota completa (.md)
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportDocx}
+                  disabled={exportingDocx}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
+                >
+                  {exportingDocx ? <Spinner size="xs" /> : <Icon name="file-doc" className="shrink-0" />} {exportingDocx ? "Exportando…" : "Nota completa (.docx)"}
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={exportPdf}
+                  disabled={exportingPdf}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
+                >
+                  {exportingPdf ? <Spinner size="xs" /> : <Icon name="note" className="shrink-0" />} {exportingPdf ? "Exportando…" : "Nota completa (.pdf)"}
+                </button>
+                <div className="my-1 border-t border-border" role="separator" />
+                <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-tertiary">Enviar a la nube</p>
+                <button
+                  role="menuitem"
+                  onClick={exportDrive}
+                  disabled={exportingDrive}
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
+                >
+                  {exportingDrive ? <Spinner size="xs" /> : <Icon name="drive" className="shrink-0" />} {exportingDrive ? "Exportando…" : "Google Drive"}
+                </button>
+              </div>,
+              document.body
+            )}
+        </div>
+        <Button variant="danger-outline" onClick={remove} className="ml-auto">
+          Borrar
+        </Button>
+      </div>
+
       {/* Resumen con IA (Fase F5) */}
       <div className="mt-5 rounded-xl border border-border-strong bg-surface p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -935,110 +1036,6 @@ export function TranscriptionDetail({
         disabled={dirty}
         disabledReason={dirty ? "Guardá los cambios de texto antes de usar el chat." : undefined}
       />
-
-      {/* Texto editable */}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={14}
-        aria-label="Texto de la transcripción"
-        className="mt-5 w-full resize-y rounded-xl border border-border-strong p-4 text-foreground focus:border-accent focus:outline-none"
-      />
-
-      {/* Sticky action bar: the primary actions (Save/Copy/Export/Delete) used to sit at the very
-          bottom of a long page, only reachable after scrolling past every AI card. Keeping the bar
-          pinned to the bottom of the viewport makes them reachable from anywhere on the note. */}
-      <div className="sticky bottom-3 z-10 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/95 p-2 shadow-lg backdrop-blur">
-        <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>
-          {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
-        </Button>
-        <CopyButton text={text} label="Copiar" ariaLabel="Copiar la transcripción completa" size="md" />
-        <Button variant="secondary" onClick={download}>
-          Descargar .txt
-        </Button>
-        {audioSrc && (
-          <Button variant="secondary" onClick={downloadAudio}>
-            Descargar audio
-          </Button>
-        )}
-        <div className="relative">
-          <button
-            ref={exportTriggerRef}
-            type="button"
-            onClick={() => setExportOpen((o) => !o)}
-            aria-haspopup="menu"
-            aria-expanded={exportOpen}
-            className={buttonClasses({ variant: "secondary" })}
-          >
-            Exportar
-            <Icon name="chevron-down" className="shrink-0" />
-          </button>
-          {exportOpen &&
-            createPortal(
-              <div
-                ref={exportPanelRef}
-                role="menu"
-                style={{
-                  position: "fixed",
-                  top: exportCoords?.top ?? -9999,
-                  left: exportCoords?.left ?? -9999,
-                  width: EXPORT_MENU_WIDTH,
-                  visibility: exportCoords ? "visible" : "hidden",
-                }}
-                // z-50: mismo nivel que IconMenu/EmojiPicker (ver jerarquía en
-                // `components/ui/Modal.tsx`), para mantener una escala de z-index coherente entre
-                // todos los popovers porteados de la app.
-                className="z-50 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
-              >
-                <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-tertiary">Descargar</p>
-                <button
-                  role="menuitem"
-                  onClick={exportMarkdown}
-                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
-                >
-                  <Icon name="file-md" className="shrink-0" /> Obsidian / Markdown (.md)
-                </button>
-                <button
-                  role="menuitem"
-                  onClick={exportNoteMarkdown}
-                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
-                >
-                  <Icon name="note" className="shrink-0" /> Nota completa (.md)
-                </button>
-                <button
-                  role="menuitem"
-                  onClick={exportDocx}
-                  disabled={exportingDocx}
-                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
-                >
-                  {exportingDocx ? <Spinner size="xs" /> : <Icon name="file-doc" className="shrink-0" />} {exportingDocx ? "Exportando…" : "Nota completa (.docx)"}
-                </button>
-                <button
-                  role="menuitem"
-                  onClick={exportPdf}
-                  disabled={exportingPdf}
-                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
-                >
-                  {exportingPdf ? <Spinner size="xs" /> : <Icon name="note" className="shrink-0" />} {exportingPdf ? "Exportando…" : "Nota completa (.pdf)"}
-                </button>
-                <div className="my-1 border-t border-border" role="separator" />
-                <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-tertiary">Enviar a la nube</p>
-                <button
-                  role="menuitem"
-                  onClick={exportDrive}
-                  disabled={exportingDrive}
-                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
-                >
-                  {exportingDrive ? <Spinner size="xs" /> : <Icon name="drive" className="shrink-0" />} {exportingDrive ? "Exportando…" : "Google Drive"}
-                </button>
-              </div>,
-              document.body
-            )}
-        </div>
-        <Button variant="danger-outline" onClick={remove} className="ml-auto">
-          Borrar
-        </Button>
-      </div>
     </div>
   );
 }
