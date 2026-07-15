@@ -3,25 +3,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/Button";
+import { Button, buttonClasses } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { Icon } from "@/components/ui/icon";
 import { formatDuration, formatRecordingFileName, defaultTitleFromFileName } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
 
-type Phase = "requesting" | "recording" | "uploading" | "done" | "error";
+type Phase = "idle" | "requesting" | "recording" | "uploading" | "done" | "error";
 
 /**
  * Captura sin fricción (ver brainstorm homónimo): a diferencia de `TranscribeWorkspace`, esta
- * pantalla NO tiene selector de proyecto/idioma/calidad ni cola — pide el micrófono apenas monta,
- * graba con un solo botón grande de Detener, y al frenar sube DIRECTO a `/api/transcribe` con los
- * defaults persistentes del usuario (mismos `defaults.language`/`defaults.quality` que
- * `TranscribeWorkspace` usa como valor inicial). Cero pasos entre "se me ocurrió algo" y grabar.
+ * pantalla NO tiene selector de proyecto/idioma/calidad ni cola — graba con un solo botón grande,
+ * y al frenar sube DIRECTO a `/api/transcribe` con los defaults persistentes del usuario (mismos
+ * `defaults.language`/`defaults.quality` que `TranscribeWorkspace` usa como valor inicial). Cero
+ * pasos entre "se me ocurrió algo" y grabar.
  */
 export function CaptureWorkspace({
   defaults,
   initialError,
+  autoStart = false,
 }: {
   defaults: TranscriptionDefaults;
   // Presente cuando `/api/share-target` (ver route.ts) no pudo transcribir un audio compartido
@@ -29,12 +30,19 @@ export function CaptureWorkspace({
   // mostramos el error y dejamos que la usuaria decida (reintentar grabando, o ir a subir el
   // archivo a mano desde `/app/transcribe`).
   initialError?: string;
+  // Solo `true` cuando la usuaria PIDIÓ grabar (`?grabar=1`, ver page.tsx). Llegar a esta pantalla
+  // sin intención (volver atrás desde la transcripción, por ejemplo) NO puede prender el micrófono.
+  autoStart?: boolean;
 }) {
   const router = useRouter();
-  const [phase, setPhase] = useState<Phase>(initialError ? "error" : "requesting");
+  const [phase, setPhase] = useState<Phase>(initialError ? "error" : autoStart ? "requesting" : "idle");
   const [seconds, setSeconds] = useState(0);
   const [message, setMessage] = useState(initialError ?? "");
   const [resultId, setResultId] = useState<string | null>(null);
+  // Id de la nota que el server rescató cuando la transcripción falló: el audio se guarda igual
+  // (ver "rescate del audio" en `/api/transcribe`), así que ofrecemos verla en vez de reintentar
+  // — reintentar duplicaría la nota ya creada.
+  const [rescuedId, setRescuedId] = useState<string | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -64,6 +72,7 @@ export function CaptureWorkspace({
       setPendingFile(file);
       setPhase("uploading");
       setMessage("");
+      setRescuedId(null);
       try {
         const form = new FormData();
         form.append("file", file);
@@ -77,13 +86,31 @@ export function CaptureWorkspace({
 
         const resp = await fetch("/api/transcribe", { method: "POST", body: form });
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "No se pudo transcribir la grabación.");
+
+        if (!resp.ok) {
+          // El server ya intentó rescatar el audio: si nos devuelve un id, la grabación NO se
+          // perdió y reintentar crearía una nota duplicada — por eso soltamos `pendingFile`.
+          const saved = typeof data.id === "string" ? data.id : null;
+          if (saved) setPendingFile(null);
+          setRescuedId(saved);
+          setPhase("error");
+          setMessage(data.error || "No se pudo transcribir la grabación.");
+          router.refresh(); // la nota rescatada tiene que aparecer en el dashboard
+          return;
+        }
 
         setPendingFile(null);
-        setResultId(typeof data.id === "string" ? data.id : null);
+        const newId = typeof data.id === "string" ? data.id : null;
+        setResultId(newId);
         setPhase("done");
         router.refresh(); // que el dashboard vea la nueva transcripción
+        // "Que te lleve directamente": al terminar, la usuaria quiere VER su nota, no un link.
+        // `replace` (no `push`) a propósito — así esta pantalla sale del historial y volver atrás
+        // desde la transcripción lleva al dashboard, en vez de re-montar el grabador.
+        if (newId) router.replace(`/app/t/${newId}`);
       } catch (e) {
+        // Acá solo caen fallas de red/parseo: el server nunca respondió, así que no hubo rescate y
+        // `pendingFile` sigue siendo válido para reintentar la subida sin volver a grabar.
         setPhase("error");
         setMessage(e instanceof Error ? e.message : "No se pudo subir la grabación.");
       }
@@ -156,12 +183,18 @@ export function CaptureWorkspace({
   const recordAgain = useCallback(() => {
     setResultId(null);
     setPendingFile(null);
+    setRescuedId(null);
     void startRecording();
   }, [startRecording]);
 
-  // Arranca a grabar solo apenas monta esta pantalla — a menos que haya un `initialError` (llegada
-  // desde `/api/share-target`), en cuyo caso esperamos a que la usuaria toque "Grabar" a propósito
-  // en vez de pedir el micrófono sin que lo haya pedido.
+  // Arranca a grabar solo si la usuaria LO PIDIÓ (`?grabar=1`, ver page.tsx) y no venimos de un
+  // error de share-target. Montar esta pantalla NO alcanza como intención: volver atrás desde la
+  // transcripción la re-monta, y cuando esto arrancaba en cada montaje te grababa de nuevo sola.
+  //
+  // Apenas arranca, sacamos el `?grabar=1` de la URL con `history.replaceState` (no `router.replace`,
+  // que dispararía un round-trip al server y re-renderizaría en medio de la grabación): así la
+  // entrada del historial queda SIN el flag y volver a ella más tarde muestra la pantalla en
+  // reposo en vez de prender el micrófono.
   //
   // El kick-off vive en un `setTimeout(…, 0)` en vez de llamarse directo: `react-hooks/set-state-in-effect`
   // no puede ver que `startRecording` ya difiere su primer setState hasta después de un `await`
@@ -171,15 +204,21 @@ export function CaptureWorkspace({
   // documenta https://react.dev/learn/you-might-not-need-an-effect). Sin timer real: 0ms es
   // indistinguible para la usuaria de una llamada directa.
   useEffect(() => {
-    if (initialError) return;
-    const timeoutId = window.setTimeout(() => void startRecording(), 0);
+    let timeoutId: number | undefined;
+    if (!initialError && autoStart) {
+      window.history.replaceState(null, "", "/app/capturar");
+      timeoutId = window.setTimeout(() => void startRecording(), 0);
+    }
+    // La limpieza se registra SIEMPRE, aunque no arranquemos solos: desde la pantalla en reposo la
+    // usuaria puede tocar "Grabar", y si después se va sin frenar, el micrófono tiene que apagarse
+    // igual (si no, queda grabando con la pantalla cerrada).
     return () => {
-      window.clearTimeout(timeoutId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
       stopTimer();
       recorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar, `initialError` es fijo para esta instancia
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar; `initialError`/`autoStart` son fijos para esta instancia
   }, []);
 
   return (
@@ -206,6 +245,26 @@ export function CaptureWorkspace({
       <p role="status" aria-live="assertive" className="sr-only">
         {statusAnnouncement(phase, message)}
       </p>
+
+      {phase === "idle" && (
+        <div className="flex flex-col items-center gap-5">
+          <p className="text-lg font-semibold text-secondary">¿Grabamos una nota?</p>
+          <button
+            type="button"
+            onClick={() => void startRecording()}
+            aria-label="Empezar a grabar"
+            className="tap-target flex h-32 w-32 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700 focus-visible:outline focus-visible:outline-4 focus-visible:outline-brand-300 active:scale-95"
+          >
+            <span className="flex flex-col items-center gap-1">
+              <Icon name="mic" size={28} />
+              <span className="text-base font-bold">Grabar</span>
+            </span>
+          </button>
+          <Link href="/app/transcribe" className="text-sm font-semibold text-accent hover:underline">
+            Subir un archivo →
+          </Link>
+        </div>
+      )}
 
       {phase === "requesting" && (
         <div className="flex flex-col items-center gap-3">
@@ -273,8 +332,21 @@ export function CaptureWorkspace({
           <p role="alert" className="text-secondary">
             {message || "Ocurrió un error."}
           </p>
+          {/* El audio no se perdió: el server lo guardó igual (ver "rescate del audio" en
+              `/api/transcribe`). Decirlo explícito importa — el miedo real de la usuaria acá es
+              haber perdido una grabación que no puede repetir. */}
+          {rescuedId && (
+            <p className="text-sm text-tertiary">
+              Tranqui: tu audio quedó guardado igual, solo falta el texto.
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-center gap-3">
-            {pendingFile ? (
+            {rescuedId ? (
+              <Link href={`/app/t/${rescuedId}`} className={buttonClasses({ size: "lg" })}>
+                <Icon name="note" className="shrink-0" />
+                Ver la nota con el audio
+              </Link>
+            ) : pendingFile ? (
               <Button onClick={retryUpload} size="lg">
                 Reintentar
               </Button>
@@ -303,6 +375,8 @@ export function CaptureWorkspace({
  */
 export function statusAnnouncement(phase: Phase, message: string): string {
   switch (phase) {
+    case "idle":
+      return "Listo para grabar.";
     case "requesting":
       return "Pidiendo permiso de micrófono.";
     case "recording":

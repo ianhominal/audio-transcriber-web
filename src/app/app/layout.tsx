@@ -29,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <nav className="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="Cuenta">
               {/* Frictionless one-tap recorder: the ICP records solo voice notes, so this is the
                   primary action and gets a permanent, prominent home in the header. */}
-              <Link href="/app/capturar" className={buttonClasses({ size: "sm" }) + " mr-1"}>
+              <Link href="/app/capturar?grabar=1" className={buttonClasses({ size: "sm" }) + " mr-1"}>
                 <Icon name="mic" /> Grabar
               </Link>
               <Link

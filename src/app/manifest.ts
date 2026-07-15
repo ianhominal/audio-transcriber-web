@@ -34,14 +34,15 @@ export default function manifest(): MetadataRoute.Manifest {
       },
     ],
     // Captura sin fricción (ver brainstorm homónimo): mantener apretado el ícono de la app
-    // instalada muestra este acceso directo, que salta derecho a `/app/capturar` (arranca a grabar
-    // solo, ver `capture-workspace.tsx`) — sin pasar por el dashboard ni el selector de proyecto.
+    // instalada muestra este acceso directo, que salta derecho a `/app/capturar` — sin pasar por
+    // el dashboard ni el selector de proyecto. El `?grabar=1` es la señal de intención explícita
+    // que hace que la pantalla arranque el micrófono sola (ver `capturar/page.tsx`).
     shortcuts: [
       {
         name: "Grabar",
         short_name: "Grabar",
         description: "Empezar a grabar una idea al toque, sin pasos de más.",
-        url: "/app/capturar",
+        url: "/app/capturar?grabar=1",
         icons: [{ src: "/icons/icon-192", sizes: "192x192", type: "image/png" }],
       },
     ],

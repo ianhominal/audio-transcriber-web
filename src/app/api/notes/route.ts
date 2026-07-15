@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { getApiUser } from "@/lib/supabase/api";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { buildChatNoteDraft } from "@/lib/notes/chatNote";
+import { buildWrittenNoteDraft } from "@/lib/notes/writtenNote";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -30,16 +31,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Necesitás iniciar sesión." }, { status: 401 });
   }
 
-  let body: { text?: unknown };
+  let body: { text?: unknown; title?: unknown; projectId?: unknown; source?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Cuerpo inválido." }, { status: 400 });
   }
 
-  const draft = buildChatNoteDraft(typeof body.text === "string" ? body.text : "");
+  // `source: "manual"` = nota TECLEADA por la usuaria ("Escribir nota"); cualquier otro valor
+  // mantiene el comportamiento original de "Guardar como nota" del chat. Default a "chat" a
+  // propósito: los clientes viejos (incluido el desktop) no mandan `source`.
+  const text = typeof body.text === "string" ? body.text : "";
+  const draft =
+    body.source === "manual"
+      ? buildWrittenNoteDraft(text, typeof body.title === "string" ? body.title : null)
+      : buildChatNoteDraft(text);
   if ("error" in draft) {
     return NextResponse.json({ error: draft.error }, { status: 400 });
+  }
+
+  // Proyecto destino (opcional): se valida que sea DE ESTA usuaria antes de usarlo. La FK sola no
+  // alcanza — apunta a `projects.id` sin mirar el dueño, así que un id ajeno pasaría. RLS scopea el
+  // SELECT, así que una fila ajena/inexistente vuelve como `null` y se corta acá.
+  let projectId: string | null = null;
+  if (typeof body.projectId === "string" && body.projectId) {
+    const { data: project } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("id", body.projectId)
+      .eq("user_id", user.id)
+      .maybeSingle<{ id: string }>();
+    if (!project) {
+      return NextResponse.json({ error: "No encontramos ese proyecto." }, { status: 400 });
+    }
+    projectId = project.id;
   }
 
   // Límite diario COMPARTIDO con `/api/transcribe`: esta nota se inserta en la MISMA tabla
@@ -77,6 +102,7 @@ export async function POST(req: NextRequest) {
 
   const baseRow = {
     user_id: user.id,
+    project_id: projectId,
     title: draft.title,
     audio_name: draft.audio_name,
     audio_size: 0,

@@ -367,6 +367,12 @@ export default async function Dashboard({
               <Link href={newHref} className={buttonClasses({ size: "md" })}>
                 <Icon name="mic" /> Nueva transcripción
               </Link>
+              <Link
+                href={`/app/nota?project=${activeProject.id}`}
+                className={buttonClasses({ variant: "secondary", size: "sm" })}
+              >
+                <Icon name="edit" /> Escribir nota
+              </Link>
               <NewSubfolderButton parentId={activeProject.id} available={subfoldersAvailable} />
               {/* "Merge several notes into one document" (feature 2026-07-13): only makes sense with
                   at least 2 DIRECT notes in this project/folder — same per-project navigation
@@ -427,29 +433,37 @@ export default async function Dashboard({
         ) : (
           <>
             {isFirstTimeCandidate && (
-              <OnboardingWelcome hasAnyNotes={total > 0} recordHref="/app/capturar" uploadHref={newHref} />
+              <OnboardingWelcome hasAnyNotes={total > 0} recordHref="/app/capturar?grabar=1" uploadHref={newHref} />
             )}
             <ResurfaceCard candidates={resurfaceCandidates} />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
-              <Link href={newHref} className={buttonClasses({ size: "md" })}>
-                <Icon name="mic" /> Nueva transcripción
-              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link href={newHref} className={buttonClasses({ size: "md" })}>
+                  <Icon name="mic" /> Nueva transcripción
+                </Link>
+                <Link href="/app/nota" className={buttonClasses({ variant: "secondary", size: "sm" })}>
+                  <Icon name="edit" /> Escribir nota
+                </Link>
+              </div>
             </div>
 
             {items.length === 0 ? (
               <EmptyState
                 className="mt-8"
                 icon={<Icon name="mic" size={28} />}
-                title="Todavía no hay transcripciones acá"
-                description="Grabá tu voz, capturá una reunión o subí un audio y va a aparecer en esta lista."
+                title="Todavía no hay notas acá"
+                description="Grabá tu voz, subí un audio o escribí una nota a mano: todo aparece en esta lista."
                 action={
                   <>
-                    <Link href="/app/capturar" className={buttonClasses({ size: "sm" })}>
+                    <Link href="/app/capturar?grabar=1" className={buttonClasses({ size: "sm" })}>
                       <Icon name="mic" /> Grabar
                     </Link>
                     <Link href={newHref} className={buttonClasses({ variant: "secondary", size: "sm" })}>
                       <Icon name="upload" /> Subir audio
+                    </Link>
+                    <Link href="/app/nota" className={buttonClasses({ variant: "secondary", size: "sm" })}>
+                      <Icon name="edit" /> Escribir nota
                     </Link>
                   </>
                 }

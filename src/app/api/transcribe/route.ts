@@ -11,6 +11,7 @@ import {
 } from "@/lib/storage";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
 import { resolveGroqModel } from "@/lib/transcribe/model";
+import { friendlyTranscribeError } from "@/lib/transcribe/errors";
 import { dedupeSatisfiesRequest } from "@/lib/transcribe/dedupe";
 import { resolveTranscribeMode, resolveTranslationLanguage, translationLanguageLabel } from "@/lib/translate/languages";
 import { translateText } from "@/lib/translate/groq";
@@ -194,6 +195,60 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  /**
+   * Guarda SOLO el audio (nota sin texto) cuando el proveedor falla — ver el uso más abajo.
+   * Best-effort de punta a punta: si el upload o el insert fallan, la usuaria igual recibe su
+   * mensaje de error, solo que sin nota rescatada. A propósito NO usa el cascade de compat del
+   * paso 4: una nota sin transcripción no necesita ninguna de las columnas opcionales
+   * (`tags`, `translated_to`, …), solo las base, que existen en todos los entornos.
+   */
+  const rescueAudioOnly = async (): Promise<{ id: string | null; audioStored: boolean }> => {
+    let rescuedPath: string | null = null;
+    try {
+      const ext = audioExtension(audioName);
+      const candidatePath = buildAudioObjectPath(user.id, randomUUID(), ext);
+      const { error: upErr } = await uploadWithRetry(() =>
+        supabase.storage.from(AUDIO_BUCKET).upload(candidatePath, file, {
+          contentType: file.type || "application/octet-stream",
+          upsert: false,
+        })
+      );
+      if (upErr) {
+        console.error("[transcribe] rescue upload failed", { userId: user.id, error: upErr.message });
+      } else {
+        rescuedPath = candidatePath;
+      }
+    } catch (err) {
+      console.error("[transcribe] rescue upload threw", err, { userId: user.id });
+    }
+
+    try {
+      const { data: row, error: insertErr } = await supabase
+        .from("transcriptions")
+        .insert({
+          user_id: user.id,
+          project_id: (form.get("projectId") as string) || null,
+          title,
+          audio_name: audioName,
+          audio_size: file.size,
+          audio_url: rescuedPath,
+          text: "",
+          language,
+          model,
+        })
+        .select("id")
+        .single();
+      if (insertErr) {
+        console.error("[transcribe] rescue insert failed", { userId: user.id, error: insertErr.message });
+        return { id: null, audioStored: rescuedPath !== null };
+      }
+      return { id: (row?.id as string) ?? null, audioStored: rescuedPath !== null };
+    } catch (err) {
+      console.error("[transcribe] rescue insert threw", err, { userId: user.id });
+      return { id: null, audioStored: rescuedPath !== null };
+    }
+  };
+
   // 2) Transcribir con Groq.
   const groqForm = new FormData();
   groqForm.append("file", file, file.name || "audio");
@@ -215,14 +270,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Cuota diaria agotada → mensaje amigable ("pausado para todos" hoy).
-  if (groqResp.status === 429) {
-    return NextResponse.json(
-      { error: "El servicio está saturado por hoy (se alcanzó el límite diario). Probá más tarde." },
-      { status: 429 }
-    );
-  }
-
   const raw = await groqResp.text();
   let data: { text?: string; error?: { message?: string } } = {};
   try {
@@ -232,8 +279,29 @@ export async function POST(req: NextRequest) {
   }
 
   if (!groqResp.ok) {
+    // El mensaje del proveedor NUNCA sale al cliente (inglés, técnico, filtra org/modelo/billing):
+    // se loguea acá y se traduce a algo accionable con `friendlyTranscribeError`.
+    const providerMessage = data?.error?.message ?? raw.slice(0, 500);
+    console.error("[transcribe] provider rejected the request", {
+      userId: user.id,
+      status: groqResp.status,
+      model,
+      providerMessage,
+    });
+    Sentry.captureException(new Error(`Groq transcription failed (${groqResp.status})`), {
+      extra: { userId: user.id, status: groqResp.status, model, providerMessage, stage: "groq-transcribe" },
+    });
+
+    // Rescate del audio: que falle la transcripción NO puede costarle la grabación a la usuaria
+    // (puede haber grabado algo irrepetible). Guardamos el audio + una nota sin texto y devolvemos
+    // el id para que el cliente pueda linkearla.
+    const rescued = await rescueAudioOnly();
     return NextResponse.json(
-      { error: data?.error?.message || "No se pudo completar la transcripción. Probá de nuevo." },
+      {
+        error: friendlyTranscribeError(groqResp.status, providerMessage),
+        id: rescued.id ?? undefined,
+        audioStored: rescued.audioStored,
+      },
       { status: groqResp.status }
     );
   }
