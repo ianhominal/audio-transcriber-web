@@ -913,7 +913,11 @@ export function TranscriptionDetail({
 
         {recipesLoaded && recipes.length === 0 ? (
           <p className="mt-2 text-xs text-tertiary">
-            Todavía no creaste ningún formato. Creá uno en Ajustes para poder aplicarlo acá.
+            Todavía no creaste ningún formato (brief, guion, hooks…).{" "}
+            <Link href="/app/ajustes" className="font-semibold text-accent hover:underline">
+              Creá tu primer formato
+            </Link>{" "}
+            para aplicarlo con un toque acá.
           </p>
         ) : (
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -926,8 +930,8 @@ export function TranscriptionDetail({
             >
               {recipes.map((recipe) => (
                 <option key={recipe.id} value={recipe.id}>
-                  {recipe.isDefault ? "⭐ " : ""}
                   {recipe.name}
+                  {recipe.isDefault ? " · predeterminado" : ""}
                 </option>
               ))}
             </select>
