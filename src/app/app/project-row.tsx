@@ -113,7 +113,7 @@ export function ProjectRow({
     return (
       <div
         style={{ paddingLeft: Math.min(depth, MAX_INDENT_DEPTH) * 16 }}
-        className="flex items-center gap-1.5 rounded-lg bg-background px-1.5 py-1.5"
+        className="flex flex-wrap items-center gap-1.5 rounded-lg bg-background px-1.5 py-1.5"
       >
         <EmojiPicker value={icon} onChange={setIcon} />
         <ProjectColorPicker value={color} onChange={setColor} />

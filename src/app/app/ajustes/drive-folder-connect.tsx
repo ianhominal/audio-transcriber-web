@@ -292,7 +292,7 @@ export function DriveFolderConnect() {
                   disabled={creatingFolder}
                   placeholder="Nombre de la carpeta"
                   aria-label="Nombre de la carpeta nueva"
-                  className="w-full rounded-lg border border-border-strong px-3 py-1.5 text-sm text-secondary focus:border-accent focus:outline-none disabled:opacity-50"
+                  className="min-w-0 flex-1 rounded-lg border border-border-strong px-3 py-1.5 text-sm text-secondary focus:border-accent focus:outline-none disabled:opacity-50"
                 />
                 <Button size="sm" onClick={submitCreateFolder} loading={creatingFolder}>
                   Crear

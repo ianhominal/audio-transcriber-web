@@ -86,7 +86,7 @@ export function ProjectHeader({
       <div className="p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           {editingName ? (
-            <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <EmojiPicker value={icon} onChange={setIcon} />
               <ProjectColorPicker value={color} onChange={setColor} />
               <input

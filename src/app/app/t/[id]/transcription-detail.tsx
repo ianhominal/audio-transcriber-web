@@ -821,7 +821,7 @@ export function TranscriptionDetail({
               document.body
             )}
         </div>
-        <Button variant="danger-outline" onClick={remove} className="ml-auto">
+        <Button variant="danger-outline" onClick={remove} className="sm:ml-auto">
           Borrar
         </Button>
       </div>

@@ -162,6 +162,12 @@ body {
    Sin colores acá — todo hereda `currentColor`/tamaño de la clase que traiga el contenedor
    (`text-secondary`, `text-foreground`, blanco en la burbuja de la usuaria), mismos tokens
    light/dark de siempre, sin duplicarlos ni romper el contraste ya validado. */
+.markdown-body {
+  /* Long unbroken tokens (URLs, hashes, file names) must wrap instead of forcing horizontal
+     overflow — matters most inside narrow chat bubbles on mobile. */
+  overflow-wrap: break-word;
+}
+
 .markdown-body > :first-child {
   margin-top: 0;
 }

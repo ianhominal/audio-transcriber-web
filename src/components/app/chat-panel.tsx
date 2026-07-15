@@ -252,8 +252,8 @@ export function ChatPanel({
             <div
               className={
                 message.role === "user"
-                  ? "max-w-[85%] rounded-2xl bg-brand-600 px-3.5 py-2 text-sm text-white"
-                  : "max-w-[85%] rounded-2xl border border-border bg-background px-3.5 py-2 text-sm text-foreground"
+                  ? "max-w-[85%] break-words rounded-2xl bg-brand-600 px-3.5 py-2 text-sm text-white"
+                  : "max-w-[85%] break-words rounded-2xl border border-border bg-background px-3.5 py-2 text-sm text-foreground"
               }
             >
               {/* Respuestas del asistente se renderizan como Markdown restringido (`markdownToSafeHtml`,
@@ -271,7 +271,7 @@ export function ChatPanel({
                   shouldRenderMarkdown(message.role) ? (
                     <MarkdownContent key={i} text={part.text} />
                   ) : (
-                    <span key={i} className="whitespace-pre-wrap">
+                    <span key={i} className="whitespace-pre-wrap break-words">
                       {part.text}
                     </span>
                   )
