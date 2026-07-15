@@ -49,7 +49,7 @@ export function WriteNoteForm({
       // Igual que al terminar de grabar: la llevamos derecho a su nota nueva, no a un link.
       router.replace(`/app/t/${data.id}`);
     } catch {
-      setError("No se pudo guardar la nota. Fijate la conexión y probá de nuevo.");
+      setError("No se pudo guardar la nota. Revisá tu conexión y probá de nuevo.");
       setSaving(false);
     }
   };

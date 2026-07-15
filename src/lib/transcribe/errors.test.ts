@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { friendlyTranscribeError } from "./errors";
+import { friendlyTranscribeError, isDailyAudioQuotaError, qualityFallbackNotice } from "./errors";
 
 /** The real message Groq returned when the account's daily audio quota ran out (413, not 429). */
 const ASPD_MESSAGE =
@@ -48,6 +48,20 @@ describe("friendlyTranscribeError", () => {
     expect(friendlyTranscribeError(500)).toBeTruthy();
   });
 
+  it("keeps the copy free of slang (UI copy is neutral rioplatense, not chat voice)", () => {
+    const all = [
+      friendlyTranscribeError(413, ASPD_MESSAGE),
+      friendlyTranscribeError(413, "too large"),
+      friendlyTranscribeError(429, ""),
+      friendlyTranscribeError(400, ""),
+      friendlyTranscribeError(500, ""),
+    ].join(" ");
+    // Word-boundary matching on purpose: "computadora" legitimately starts with "compu".
+    for (const slang of ["tranqui", "compu", "posta", "joya", "al toque"]) {
+      expect(all.toLowerCase()).not.toMatch(new RegExp(`\\b${slang}\\b`));
+    }
+  });
+
   // The whole point of this module: the provider's text must never reach the UI.
   it("never leaks provider internals (org id, model, billing link) for any status", () => {
     for (const status of [400, 401, 403, 413, 429, 500, 503, 418]) {
@@ -57,5 +71,34 @@ describe("friendlyTranscribeError", () => {
       expect(result).not.toContain("console.groq.com");
       expect(result).not.toContain("ASPD");
     }
+  });
+});
+
+describe("isDailyAudioQuotaError", () => {
+  it("detects the real ASPD message", () => {
+    expect(isDailyAudioQuotaError(ASPD_MESSAGE)).toBe(true);
+  });
+
+  it("ignores the status and keys off the message (Groq answers 413 where 429 is expected)", () => {
+    expect(isDailyAudioQuotaError("on seconds of audio per day (ASPD): Limit 28800")).toBe(true);
+  });
+
+  it("is false for an ordinary oversized-file rejection", () => {
+    expect(isDailyAudioQuotaError("Request too large")).toBe(false);
+  });
+
+  it("is false for missing/empty messages", () => {
+    expect(isDailyAudioQuotaError(null)).toBe(false);
+    expect(isDailyAudioQuotaError(undefined)).toBe(false);
+    expect(isDailyAudioQuotaError("")).toBe(false);
+  });
+});
+
+describe("qualityFallbackNotice", () => {
+  it("names both the used and the exhausted quality, in the user's words (no model ids)", () => {
+    const notice = qualityFallbackNotice("Máxima calidad", "Rápida");
+    expect(notice).toContain("Rápida");
+    expect(notice).toContain("Máxima calidad");
+    expect(notice).not.toContain("whisper");
   });
 });

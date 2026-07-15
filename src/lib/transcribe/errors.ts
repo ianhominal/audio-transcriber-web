@@ -11,12 +11,17 @@
  * quota (ASPD) runs out — so status alone can't tell "this one file is too big" apart from "the
  * whole account is out of quota for today". The message is the only signal, hence the sniffing.
  */
-export function friendlyTranscribeError(status: number, providerMessage?: string | null): string {
+export function isDailyAudioQuotaError(providerMessage?: string | null): boolean {
   const msg = (providerMessage ?? "").toLowerCase();
+  // Message-driven on purpose (not status-driven): Groq already answers 413 where you'd expect 429,
+  // so the status is the least trustworthy part of this signal.
+  return msg.includes("seconds of audio per day") || msg.includes("aspd");
+}
 
+export function friendlyTranscribeError(status: number, providerMessage?: string | null): string {
   // Daily audio-seconds quota for the whole account (shared across users): comes back as 413.
-  if (msg.includes("seconds of audio per day") || msg.includes("aspd")) {
-    return "Llegamos al límite de audio por hoy. Probá de nuevo mañana, o usá la app de escritorio, que transcribe en tu compu sin límite.";
+  if (isDailyAudioQuotaError(providerMessage)) {
+    return "Llegamos al límite de audio por hoy. Probá de nuevo mañana, o usá la app de escritorio, que transcribe en tu computadora sin límite.";
   }
 
   // Per-request size cap (a genuinely huge file).
@@ -41,4 +46,13 @@ export function friendlyTranscribeError(status: number, providerMessage?: string
   }
 
   return "No se pudo completar la transcripción. Probá de nuevo.";
+}
+
+/**
+ * Aviso cuando se transcribió con otra calidad porque la pedida se quedó sin cuota por hoy. Se
+ * avisa SIEMPRE (nunca se cambia la calidad en silencio): la usuaria eligió "Máxima calidad" a
+ * propósito y tiene que saber que ese texto salió del modelo rápido.
+ */
+export function qualityFallbackNotice(requestedLabel: string, usedLabel: string): string {
+  return `Se transcribió con calidad ${usedLabel}: la cuota de ${requestedLabel} se agotó por hoy.`;
 }

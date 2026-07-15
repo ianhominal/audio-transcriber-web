@@ -21,6 +21,22 @@ export function resolveGroqModel(input: unknown): GroqModel {
 }
 
 /**
+ * Modelo al que se cae automáticamente cuando el pedido agota la cuota diaria de audio del que se
+ * pidió (ver `isDailyAudioQuotaError`). Cada modelo de Groq tiene su PROPIO contador diario, así
+ * que quedarse sin cuota en `whisper-large-v3` no implica estar sin cuota en el turbo — preferimos
+ * transcribir con menos calidad y avisarlo, antes que no transcribir.
+ */
+export const FALLBACK_GROQ_MODEL: GroqModel = "whisper-large-v3-turbo";
+
+/**
+ * Modelo alternativo a probar si `model` se quedó sin cuota, o `null` si no hay ninguno mejor que
+ * intentar (ya estamos en el de fallback) — en ese caso no tiene sentido reintentar.
+ */
+export function fallbackModelFor(model: GroqModel): GroqModel | null {
+  return model === FALLBACK_GROQ_MODEL ? null : FALLBACK_GROQ_MODEL;
+}
+
+/**
  * Etiqueta legible de "Calidad" para mostrar en la UI (badge del detalle, etc.) sin exponer el
  * nombre técnico del modelo — mismo texto que ya usan los selectores de Ajustes/Transcribir.
  */

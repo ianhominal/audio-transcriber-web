@@ -10,8 +10,8 @@ import {
   UPLOAD_MAX_ATTEMPTS,
 } from "@/lib/storage";
 import { DAILY_LIMIT, isOverDailyLimit } from "@/lib/rateLimit";
-import { resolveGroqModel } from "@/lib/transcribe/model";
-import { friendlyTranscribeError } from "@/lib/transcribe/errors";
+import { fallbackModelFor, type GroqModel, qualityLabel, resolveGroqModel } from "@/lib/transcribe/model";
+import { friendlyTranscribeError, isDailyAudioQuotaError, qualityFallbackNotice } from "@/lib/transcribe/errors";
 import { dedupeSatisfiesRequest } from "@/lib/transcribe/dedupe";
 import { resolveTranscribeMode, resolveTranslationLanguage, translationLanguageLabel } from "@/lib/translate/languages";
 import { translateText } from "@/lib/translate/groq";
@@ -250,19 +250,31 @@ export async function POST(req: NextRequest) {
   };
 
   // 2) Transcribir con Groq.
-  const groqForm = new FormData();
-  groqForm.append("file", file, file.name || "audio");
-  groqForm.append("model", model);
-  groqForm.append("response_format", "json");
-  if (language && language !== "auto") groqForm.append("language", language);
+  const callGroq = async (useModel: GroqModel) => {
+    const groqForm = new FormData();
+    groqForm.append("file", file, file.name || "audio");
+    groqForm.append("model", useModel);
+    groqForm.append("response_format", "json");
+    if (language && language !== "auto") groqForm.append("language", language);
 
-  let groqResp: Response;
-  try {
-    groqResp = await fetch(GROQ_ENDPOINT, {
+    const resp = await fetch(GROQ_ENDPOINT, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: groqForm,
     });
+    const body = await resp.text();
+    let parsed: { text?: string; error?: { message?: string } } = {};
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      /* respuesta no-JSON */
+    }
+    return { resp, raw: body, parsed };
+  };
+
+  let attempt: Awaited<ReturnType<typeof callGroq>>;
+  try {
+    attempt = await callGroq(model);
   } catch {
     return NextResponse.json(
       { error: "No se pudo conectar con el servicio de transcripción. Probá de nuevo en un momento." },
@@ -270,13 +282,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const raw = await groqResp.text();
-  let data: { text?: string; error?: { message?: string } } = {};
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    /* respuesta no-JSON */
+  // 2-bis) Fallback de calidad: cada modelo de Groq tiene su PROPIO contador diario de audio, así
+  //        que quedarse sin cuota en "Máxima calidad" no implica estar sin cuota en "Rápida".
+  //        Preferimos transcribir con menos calidad y AVISARLO (ver `qualityFallbackNotice`) antes
+  //        que devolver un error y perder la grabación. Nunca en silencio.
+  let usedModel: GroqModel = model;
+  let qualityFallbackFrom: GroqModel | null = null;
+  const fallbackModel = fallbackModelFor(model);
+
+  if (!attempt.resp.ok && fallbackModel && isDailyAudioQuotaError(attempt.parsed?.error?.message ?? attempt.raw)) {
+    console.warn("[transcribe] daily quota exhausted, retrying with the fallback model", {
+      userId: user.id,
+      requested: model,
+      fallback: fallbackModel,
+    });
+    try {
+      const retry = await callGroq(fallbackModel);
+      // Si el reintento también falla, nos quedamos con SU error: refleja el estado final real
+      // ("tampoco hay cuota en el rápido"), que es lo que la usuaria necesita saber.
+      attempt = retry;
+      if (retry.resp.ok) {
+        usedModel = fallbackModel;
+        qualityFallbackFrom = model;
+      }
+    } catch {
+      // El reintento ni siquiera salió (red): conservamos el fallo original de más arriba.
+    }
   }
+
+  const groqResp = attempt.resp;
+  const raw = attempt.raw;
+  const data = attempt.parsed;
 
   if (!groqResp.ok) {
     // El mensaje del proveedor NUNCA sale al cliente (inglés, técnico, filtra org/modelo/billing):
@@ -585,7 +621,10 @@ export async function POST(req: NextRequest) {
       audio_url: audioPath, // path del objeto; la URL firmada se genera al leer.
       text: finalText,
       language,
-      model,
+      // El modelo REALMENTE usado, que puede no ser el pedido si hubo fallback de calidad (ver
+      // paso 2-bis): el badge "Calidad" del detalle sale de acá, y mentiría si guardáramos el
+      // pedido.
+      model: usedModel,
     };
     // `translated_to`/`original_text` (Fase F4, ver supabase/migrations/20260709210000_translation.sql),
     // `vocabulary_corrected` (feature de vocabulario custom, ver
@@ -694,5 +733,10 @@ export async function POST(req: NextRequest) {
     title: finalTitle,
     tags: tagsSaved ? autoTags : [],
     ...(translationWarning ? { translationWarning } : {}),
+    // Se cambió la calidad sobre la marcha (paso 2-bis): el cliente TIENE que decirlo, la usuaria
+    // pidió otra cosa. Mismo patrón best-effort/no-bloqueante que `translationWarning`.
+    ...(qualityFallbackFrom
+      ? { qualityWarning: qualityFallbackNotice(qualityLabel(qualityFallbackFrom), qualityLabel(usedModel)) }
+      : {}),
   });
 }

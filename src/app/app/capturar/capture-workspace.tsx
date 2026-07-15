@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
 import { formatDuration, formatRecordingFileName, defaultTitleFromFileName } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
@@ -35,6 +36,7 @@ export function CaptureWorkspace({
   autoStart?: boolean;
 }) {
   const router = useRouter();
+  const { show: toast } = useToast();
   const [phase, setPhase] = useState<Phase>(initialError ? "error" : autoStart ? "requesting" : "idle");
   const [seconds, setSeconds] = useState(0);
   const [message, setMessage] = useState(initialError ?? "");
@@ -103,6 +105,9 @@ export function CaptureWorkspace({
         const newId = typeof data.id === "string" ? data.id : null;
         setResultId(newId);
         setPhase("done");
+        // La calidad se cambió sola por falta de cuota (ver paso 2-bis en /api/transcribe): hay que
+        // decirlo. El toast lo pinta el provider del layout, así que sobrevive al `replace` de abajo.
+        if (typeof data.qualityWarning === "string") toast(data.qualityWarning, "info");
         router.refresh(); // que el dashboard vea la nueva transcripción
         // "Que te lleve directamente": al terminar, la usuaria quiere VER su nota, no un link.
         // `replace` (no `push`) a propósito — así esta pantalla sale del historial y volver atrás
@@ -115,7 +120,7 @@ export function CaptureWorkspace({
         setMessage(e instanceof Error ? e.message : "No se pudo subir la grabación.");
       }
     },
-    [defaults.language, defaults.quality, router]
+    [defaults.language, defaults.quality, router, toast]
   );
 
   const startRecording = useCallback(async () => {
@@ -248,7 +253,7 @@ export function CaptureWorkspace({
 
       {phase === "idle" && (
         <div className="flex flex-col items-center gap-5">
-          <p className="text-lg font-semibold text-secondary">¿Grabamos una nota?</p>
+          <p className="text-lg font-semibold text-secondary">Listo para grabar</p>
           <button
             type="button"
             onClick={() => void startRecording()}
@@ -336,9 +341,7 @@ export function CaptureWorkspace({
               `/api/transcribe`). Decirlo explícito importa — el miedo real de la usuaria acá es
               haber perdido una grabación que no puede repetir. */}
           {rescuedId && (
-            <p className="text-sm text-tertiary">
-              Tranqui: tu audio quedó guardado igual, solo falta el texto.
-            </p>
+            <p className="text-sm text-tertiary">Tu audio quedó guardado igual: solo falta el texto.</p>
           )}
           <div className="flex flex-wrap items-center justify-center gap-3">
             {rescuedId ? (

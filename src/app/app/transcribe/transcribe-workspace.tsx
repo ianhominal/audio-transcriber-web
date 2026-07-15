@@ -382,6 +382,11 @@ export function TranscribeWorkspace({
     // original igual se guardó, ver `translationWarning` en /api/transcribe) — mismo criterio de
     // "un solo aviso agrupado por lote" que `audioMissingCount`.
     let translationWarningCount = 0;
+    // Cuántos ítems se transcribieron con OTRA calidad porque la pedida se quedó sin cuota diaria
+    // (ver `qualityWarning`/paso 2-bis en /api/transcribe) — mismo criterio de "un solo aviso
+    // agrupado por lote". El texto exacto lo arma el server (`qualityFallbackNotice`).
+    let qualityWarning: string | null = null;
+    let qualityWarningCount = 0;
     for (const item of toProcess) {
       // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app.
       if (item.file.size > WEB_MAX_BYTES) {
@@ -420,6 +425,10 @@ export function TranscribeWorkspace({
         okCount++;
         if (!data.duplicate && data.audioStored === false) audioMissingCount++;
         if (!data.duplicate && data.translationWarning) translationWarningCount++;
+        if (!data.duplicate && typeof data.qualityWarning === "string") {
+          qualityWarningCount++;
+          qualityWarning = data.qualityWarning;
+        }
       } catch (e) {
         patch(item.key, { status: "error", error: e instanceof Error ? e.message : "Error." });
         failCount++;
@@ -450,6 +459,15 @@ export function TranscribeWorkspace({
         translationWarningCount === 1
           ? "No se pudo traducir un audio — se guardó igual la transcripción original."
           : `No se pudo traducir ${translationWarningCount} audios — se guardaron igual las transcripciones originales.`,
+        "info"
+      );
+    }
+    // Nunca cambiamos la calidad en silencio: la usuaria eligió una a propósito.
+    if (qualityWarning) {
+      toast(
+        qualityWarningCount === 1
+          ? qualityWarning
+          : `${qualityWarning.replace(/\.$/, "")} (${qualityWarningCount} audios).`,
         "info"
       );
     }
