@@ -8,6 +8,7 @@ import { ProjectColorPicker } from "./project-color-picker";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { Icon } from "@/components/ui/icon";
 
 /**
  * Botón "Nueva carpeta" del explorador jerárquico: abre un modal (nombre + ícono + contexto
@@ -69,7 +70,7 @@ export function NewSubfolderButton({
         disabled={!available}
         title={available ? undefined : "Las subcarpetas todavía no están disponibles para tu cuenta."}
       >
-        📁 Nueva carpeta
+        <Icon name="folder" /> Nueva carpeta
       </Button>
       {open && (
         <Modal onClose={close} labelledBy="new-subfolder-title">

@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/icon";
 
 const DISMISSED_KEY = "atw:install-prompt-dismissed";
 
@@ -154,7 +155,9 @@ export function InstallPrompt() {
       <div className="min-w-0 flex-1 text-sm text-secondary">
         {platform === "ios" ? (
           <p>
-            Instalá Audio Transcriber: tocá <ShareIcon /> <strong className="font-semibold">Compartir</strong> y luego{" "}
+            Instalá Audio Transcriber: tocá{" "}
+            <Icon name="share" size={14} className="inline-block -translate-y-px text-accent" />{" "}
+            <strong className="font-semibold">Compartir</strong> y luego{" "}
             <strong className="font-semibold">&quot;Agregar a inicio&quot;</strong>.
           </p>
         ) : (
@@ -172,7 +175,7 @@ export function InstallPrompt() {
         aria-label="Cerrar aviso de instalación"
         className="tap-target -my-2 -mr-2 flex shrink-0 items-center justify-center rounded text-tertiary transition-colors duration-150 ease-out hover:text-secondary"
       >
-        ✕
+        <Icon name="close" />
       </button>
     </div>,
     document.body
@@ -185,27 +188,6 @@ function WaveIcon() {
       {[8, 14, 20, 14, 10].map((h, i) => (
         <rect key={i} x={4 + i * 4 - 1.5} y={12 - h / 2} width="3" height={h} rx="1.5" fill="currentColor" />
       ))}
-    </svg>
-  );
-}
-
-function ShareIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="inline-block -translate-y-px text-accent"
-      aria-hidden="true"
-    >
-      <path d="M12 3v12" />
-      <path d="M8 7l4-4 4 4" />
-      <rect x="5" y="12" width="14" height="9" rx="2" />
     </svg>
   );
 }

@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/icon";
 import type { VocabularyTerm } from "@/lib/vocabulary/types";
 import { MAX_TERM_LENGTH, MAX_VOCABULARY_TERMS, canAddVocabularyTerm } from "@/lib/vocabulary/validate";
 
@@ -120,8 +121,8 @@ export function VocabularySection({ initialTerms }: { initialTerms: VocabularyTe
   return (
     <div>
       <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
-          📖
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background" aria-hidden="true">
+          <Icon name="vocabulary" size={18} />
         </span>
         <div>
           <h2 className="font-semibold text-foreground">Vocabulario</h2>
@@ -200,7 +201,7 @@ export function VocabularySection({ initialTerms }: { initialTerms: VocabularyTe
                 aria-label={`Quitar "${term.term}" del vocabulario`}
                 className="shrink-0 text-tertiary transition hover:text-red-500 disabled:opacity-50"
               >
-                ✕
+                <Icon name="close" />
               </button>
             </li>
           ))}

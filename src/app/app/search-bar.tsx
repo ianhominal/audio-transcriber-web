@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { SearchSnippetSegment } from "@/lib/search/snippet";
+import { Icon } from "@/components/ui/icon";
 
 type SearchResult = {
   id: string;
@@ -124,8 +125,8 @@ export function SearchBar() {
         Buscar en tus notas
       </label>
       <div className="relative">
-        <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-tertiary">
-          🔎
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-tertiary">
+          <Icon name="search" />
         </span>
         <input
           id="dashboard-search"

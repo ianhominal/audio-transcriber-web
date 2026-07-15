@@ -7,6 +7,7 @@ import { listVocabularyTerms } from "@/lib/vocabulary/store";
 import { listMcpTokens } from "@/lib/mcp-tokens/store";
 import { listRecipes } from "@/lib/recipes/store";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Icon } from "@/components/ui/icon";
 import { DriveFolderConnect } from "./drive-folder-connect";
 import { TranscriptionDefaultsSection } from "./transcription-defaults";
 import { VocabularySection } from "./vocabulary-section";
@@ -97,7 +98,7 @@ export default async function AjustesPage({
               : "border-red-200 bg-red-50 text-red-700 dark:border-red-400/30 dark:bg-red-400/15 dark:text-red-200"
           }`}
         >
-          <span aria-hidden="true">{message.tone === "ok" ? "✓" : "✕"}</span>
+          <Icon name={message.tone === "ok" ? "success" : "error"} className="mt-0.5 shrink-0" />
           <span>{message.text}</span>
         </div>
       )}
@@ -109,8 +110,8 @@ export default async function AjustesPage({
       <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
-              🎨
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background" aria-hidden="true">
+              <Icon name="theme" size={18} />
             </span>
             <div>
               <h2 className="font-semibold text-foreground">Apariencia</h2>
@@ -141,8 +142,8 @@ export default async function AjustesPage({
 
       <section className="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
-            ☁️
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background" aria-hidden="true">
+            <Icon name="drive" size={18} />
           </span>
           <div>
             <h2 className="font-semibold text-foreground">Google Drive</h2>
@@ -155,13 +156,13 @@ export default async function AjustesPage({
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {isConnected && !isRevoked ? (
             <p className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200">
-              <span aria-hidden="true">✓</span> Google Drive conectado
+              <Icon name="success" className="shrink-0" /> Google Drive conectado
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               {isRevoked && (
                 <p className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
-                  <span aria-hidden="true">⚠️</span> Se venció el permiso de Google Drive
+                  <Icon name="warning" className="shrink-0" /> Se venció el permiso de Google Drive
                 </p>
               )}
               <a href="/api/drive/connect" className={buttonClasses({ size: "md" })}>

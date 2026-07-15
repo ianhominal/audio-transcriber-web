@@ -10,6 +10,7 @@ import {
   decodeTranscriptionDragPayload,
   resolveTranscriptionDrop,
 } from "@/lib/dnd/transcriptionDrag";
+import { Icon } from "@/components/ui/icon";
 
 /**
  * El link "Sin proyecto" del sidebar, con soporte de drop (mecanismo 1 de mover transcripciones
@@ -58,7 +59,9 @@ export function UnassignedProjectLink({ active, count }: { active: boolean; coun
         active ? "bg-accent-subtle font-semibold text-accent-subtle-text" : "text-secondary hover:bg-surface-secondary"
       } ${dragOver ? "bg-accent-subtle ring-2 ring-inset ring-accent" : ""}`}
     >
-      <span className="text-base leading-none">📄</span>
+      <span className="shrink-0">
+        <Icon name="unassigned" />
+      </span>
       <span className="min-w-0 flex-1 truncate">Sin proyecto</span>
       <span className="shrink-0 text-xs tabular-nums text-tertiary">{count}</span>
     </Link>

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { formatDate } from "@/lib/format";
 import { getProjectColor } from "@/lib/project-colors";
+import { Icon } from "@/components/ui/icon";
 
 type ProjectHeaderData = {
   id: string;
@@ -114,11 +115,13 @@ export function ProjectHeader({
                 className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-background"
                 title="Editar nombre e ícono"
               >
-                <span className="text-2xl leading-none">{project.icon || "📁"}</span>
+                <span className="text-2xl leading-none">
+                  {project.icon ? <span>{project.icon}</span> : <Icon name="folder" size={24} />}
+                </span>
                 <span className="truncate text-2xl font-bold tracking-tight text-foreground">{project.name}</span>
                 {project.syncOrigin === "drive" && (
                   <span title="Sincronizado con Google Drive" className="text-sm">
-                    ☁️
+                    <Icon name="drive" size={14} />
                   </span>
                 )}
               </button>
@@ -138,11 +141,11 @@ export function ProjectHeader({
         </div>
 
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-tertiary">
-          <span>
-            📁 {subfolderCount} subcarpeta{subfolderCount === 1 ? "" : "s"}
+          <span className="inline-flex items-center gap-1">
+            <Icon name="folder" size={14} /> {subfolderCount} subcarpeta{subfolderCount === 1 ? "" : "s"}
           </span>
-          <span>
-            🎙️ {transcriptionCount} transcripci{transcriptionCount === 1 ? "ón" : "ones"}
+          <span className="inline-flex items-center gap-1">
+            <Icon name="mic" size={14} /> {transcriptionCount} transcripci{transcriptionCount === 1 ? "ón" : "ones"}
           </span>
         </div>
 
@@ -180,7 +183,11 @@ export function ProjectHeader({
               onClick={() => setEditingDesc(true)}
               className="w-full rounded-lg px-1 py-1 text-left text-sm text-secondary transition hover:bg-background"
             >
-              {project.description || <span className="text-tertiary">+ Agregar contexto o descripción…</span>}
+              {project.description || (
+                <span className="inline-flex items-center gap-1 text-tertiary">
+                  <Icon name="plus" size={14} /> Agregar contexto o descripción…
+                </span>
+              )}
             </button>
           )}
         </div>

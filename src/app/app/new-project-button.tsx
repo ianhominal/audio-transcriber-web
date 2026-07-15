@@ -6,6 +6,7 @@ import { EmojiPicker } from "./emoji-picker";
 import { ProjectColorPicker } from "./project-color-picker";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { Icon } from "@/components/ui/icon";
 
 /** Botón + formulario inline para crear un proyecto. */
 export function NewProjectButton() {
@@ -41,9 +42,9 @@ export function NewProjectButton() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full rounded-lg border border-dashed border-border-strong px-3 py-2 text-sm font-medium text-tertiary transition hover:border-accent hover:text-accent"
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border-strong px-3 py-2 text-sm font-medium text-tertiary transition hover:border-accent hover:text-accent"
       >
-        + Nuevo proyecto
+        <Icon name="plus" /> Nuevo proyecto
       </button>
     );
   }

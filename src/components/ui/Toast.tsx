@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { Icon, type IconName } from "@/components/ui/icon";
 
 type ToastTone = "success" | "error" | "info";
 type ToastItem = { id: number; tone: ToastTone; message: string };
@@ -22,10 +23,10 @@ const TONE_CLASSES: Record<ToastTone, string> = {
   info: "border-border bg-surface text-foreground",
 };
 
-const TONE_ICON: Record<ToastTone, string> = {
-  success: "✓",
-  error: "✕",
-  info: "ℹ",
+const TONE_ICON: Record<ToastTone, IconName> = {
+  success: "success",
+  error: "error",
+  info: "info",
 };
 
 let counter = 0;
@@ -75,7 +76,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             className={`animate-toast-in pointer-events-auto flex w-full max-w-sm items-start gap-2 rounded-xl border px-4 py-3 text-sm shadow-lg ${TONE_CLASSES[t.tone]}`}
           >
             <span className="mt-0.5" aria-hidden="true">
-              {TONE_ICON[t.tone]}
+              <Icon name={TONE_ICON[t.tone]} />
             </span>
             <span className="min-w-0 flex-1">{t.message}</span>
             <button
@@ -84,7 +85,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               aria-label="Cerrar aviso"
               className="tap-target -my-2 -mr-2 flex shrink-0 items-center justify-center rounded text-current opacity-60 transition hover:opacity-100"
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
         ))}

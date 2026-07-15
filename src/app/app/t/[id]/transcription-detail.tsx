@@ -18,6 +18,7 @@ import { EmojiPicker } from "../../emoji-picker";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
+import { Icon } from "@/components/ui/icon";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useToast } from "@/components/ui/Toast";
@@ -601,10 +602,11 @@ export function TranscriptionDetail({
               aria-label="Título de la transcripción"
               className="w-full rounded-md border border-transparent bg-transparent text-2xl font-bold tracking-tight text-foreground outline-none transition-colors duration-150 ease-out hover:border-border focus:border-accent focus:bg-surface"
             />
-            {/* 📝 en vez de 🎵 para notas text-only (ej. "Guardar como nota" del chat, ver
+            {/* "text" en vez de "audio" para notas text-only (ej. "Guardar como nota" del chat, ver
                 ROADMAP.md) — mostrar un ícono de audio para algo que nunca tuvo audio confundía. */}
-            <p className="mt-0.5 px-0.5 text-xs text-tertiary">
-              {transcription.audio_url ? "🎵" : "📝"} {transcription.audio_name}
+            <p className="mt-0.5 flex items-center gap-1 px-0.5 text-xs text-tertiary">
+              <Icon name={transcription.audio_url ? "audio" : "text"} className="shrink-0" />
+              {transcription.audio_name}
             </p>
           </div>
         </div>
@@ -616,9 +618,17 @@ export function TranscriptionDetail({
         <Badge>{languageLabel(transcription.language)}</Badge>
         {transcription.audio_size > 0 && <Badge>{formatFileSize(transcription.audio_size)}</Badge>}
         {transcription.translated_to && (
-          <Badge tone="brand">🌐 Traducido a {translationLanguageLabel(transcription.translated_to)}</Badge>
+          <Badge tone="brand">
+            <Icon name="translate" size={12} className="shrink-0" />
+            Traducido a {translationLanguageLabel(transcription.translated_to)}
+          </Badge>
         )}
-        {transcription.vocabulary_corrected && <Badge tone="brand">📖 Corregido con tu vocabulario</Badge>}
+        {transcription.vocabulary_corrected && (
+          <Badge tone="brand">
+            <Icon name="vocabulary" size={12} className="shrink-0" />
+            Corregido con tu vocabulario
+          </Badge>
+        )}
       </div>
 
       {/* Tags de tema (tanda 3 de quick wins, ver ROADMAP.md): generados automáticamente al
@@ -641,7 +651,7 @@ export function TranscriptionDetail({
                   aria-label={`Quitar la etiqueta ${tag}`}
                   className="flex h-4 w-4 items-center justify-center rounded-full leading-none text-accent-subtle-text/70 transition hover:bg-black/10 hover:text-accent-subtle-text dark:hover:bg-white/10"
                 >
-                  <span aria-hidden="true">×</span>
+                  <Icon name="close" size={12} />
                 </button>
               </li>
             ))}
@@ -663,8 +673,9 @@ export function TranscriptionDetail({
       {audioSrc ? (
         <audio controls src={audioSrc} className="mt-4 w-full" />
       ) : (
-        <p className="mt-4 rounded-lg bg-background px-3 py-2 text-xs text-tertiary">
-          🎧 El audio de esta transcripción todavía no está guardado.
+        <p className="mt-4 flex items-center gap-1.5 rounded-lg bg-background px-3 py-2 text-xs text-tertiary">
+          <Icon name="headphones" className="shrink-0" />
+          El audio de esta transcripción todavía no está guardado.
         </p>
       )}
 
@@ -753,8 +764,9 @@ export function TranscriptionDetail({
           {summary && (
             <div className="mt-3 space-y-3">
               {summaryOutOfDate && (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
-                  ⚠️ El texto cambió desde que se generó este resumen — puede estar desactualizado.
+                <p className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
+                  <Icon name="warning" className="shrink-0" />
+                  El texto cambió desde que se generó este resumen — puede estar desactualizado.
                 </p>
               )}
               {/* Renderizado como Markdown restringido (quick win "renderizar markdown en pantalla",
@@ -878,8 +890,9 @@ export function TranscriptionDetail({
           aria-labelledby="default-recipe-heading"
           className="mt-5 rounded-xl border border-border-strong bg-surface p-4"
         >
-          <h3 id="default-recipe-heading" className="text-sm font-semibold text-foreground">
-            🪄 Formato aplicado: {transcription.default_recipe_name || "Formato"}
+          <h3 id="default-recipe-heading" className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            <Icon name="sparkles" className="shrink-0" />
+            Formato aplicado: {transcription.default_recipe_name || "Formato"}
           </h3>
           <div className="mt-3 space-y-3">
             <MarkdownContent text={transcription.default_recipe_output} className="text-sm text-secondary" />
@@ -954,7 +967,8 @@ export function TranscriptionDetail({
             aria-expanded={exportOpen}
             className={buttonClasses({ variant: "secondary" })}
           >
-            Exportar ▾
+            Exportar
+            <Icon name="chevron-down" className="shrink-0" />
           </button>
           {exportOpen &&
             createPortal(
@@ -976,16 +990,16 @@ export function TranscriptionDetail({
                 <button
                   role="menuitem"
                   onClick={exportMarkdown}
-                  className="block w-full rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
                 >
-                  📝 Obsidian / Markdown (.md)
+                  <Icon name="file-md" className="shrink-0" /> Obsidian / Markdown (.md)
                 </button>
                 <button
                   role="menuitem"
                   onClick={exportNoteMarkdown}
-                  className="block w-full rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
+                  className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary"
                 >
-                  🗒️ Nota completa (.md)
+                  <Icon name="note" className="shrink-0" /> Nota completa (.md)
                 </button>
                 <button
                   role="menuitem"
@@ -993,7 +1007,7 @@ export function TranscriptionDetail({
                   disabled={exportingDocx}
                   className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
                 >
-                  {exportingDocx ? <Spinner size="xs" /> : "📄"} {exportingDocx ? "Exportando…" : "Nota completa (.docx)"}
+                  {exportingDocx ? <Spinner size="xs" /> : <Icon name="file-doc" className="shrink-0" />} {exportingDocx ? "Exportando…" : "Nota completa (.docx)"}
                 </button>
                 <button
                   role="menuitem"
@@ -1001,7 +1015,7 @@ export function TranscriptionDetail({
                   disabled={exportingPdf}
                   className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
                 >
-                  {exportingPdf ? <Spinner size="xs" /> : "🧾"} {exportingPdf ? "Exportando…" : "Nota completa (.pdf)"}
+                  {exportingPdf ? <Spinner size="xs" /> : <Icon name="note" className="shrink-0" />} {exportingPdf ? "Exportando…" : "Nota completa (.pdf)"}
                 </button>
                 <button
                   role="menuitem"
@@ -1009,7 +1023,7 @@ export function TranscriptionDetail({
                   disabled={exportingDrive}
                   className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-sm text-secondary transition hover:bg-surface-secondary disabled:opacity-50"
                 >
-                  {exportingDrive ? <Spinner size="xs" /> : "📤"} {exportingDrive ? "Exportando…" : "Google Drive"}
+                  {exportingDrive ? <Spinner size="xs" /> : <Icon name="drive" className="shrink-0" />} {exportingDrive ? "Exportando…" : "Google Drive"}
                 </button>
               </div>,
               document.body

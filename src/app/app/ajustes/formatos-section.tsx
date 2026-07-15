@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/icon";
 import type { AiRecipe } from "@/lib/recipes/types";
 import { MAX_NAME_LENGTH, MAX_INSTRUCTION_LENGTH, MAX_RECIPES, canAddRecipe } from "@/lib/recipes/validate";
 
@@ -143,8 +144,8 @@ export function FormatosSection({ initialRecipes }: { initialRecipes: AiRecipe[]
   return (
     <div>
       <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
-          🪄
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background" aria-hidden="true">
+          <Icon name="sparkles" size={18} />
         </span>
         <div>
           <h2 className="font-semibold text-foreground">Formatos</h2>
@@ -232,7 +233,7 @@ export function FormatosSection({ initialRecipes }: { initialRecipes: AiRecipe[]
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                      {recipe.isDefault && <span aria-hidden="true">⭐</span>}
+                      {recipe.isDefault && <Icon name="star" className="shrink-0 fill-current" />}
                       {recipe.name}
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-xs text-tertiary">{recipe.instruction}</p>
@@ -246,7 +247,7 @@ export function FormatosSection({ initialRecipes }: { initialRecipes: AiRecipe[]
                       title={recipe.isDefault ? "Ya es tu formato por defecto" : "Usar como formato por defecto"}
                       className="rounded-md p-1.5 text-tertiary transition hover:text-accent disabled:cursor-default disabled:opacity-100"
                     >
-                      <span aria-hidden="true">{recipe.isDefault ? "⭐" : "☆"}</span>
+                      <Icon name="star" className={recipe.isDefault ? "fill-current" : undefined} />
                       <span className="sr-only">
                         {recipe.isDefault ? "Formato por defecto" : `Usar "${recipe.name}" como formato por defecto`}
                       </span>
@@ -258,7 +259,7 @@ export function FormatosSection({ initialRecipes }: { initialRecipes: AiRecipe[]
                       aria-label={`Editar "${recipe.name}"`}
                       className="rounded-md p-1.5 text-tertiary transition hover:text-accent disabled:opacity-50"
                     >
-                      ✏️
+                      <Icon name="edit" />
                     </button>
                     <button
                       type="button"
@@ -267,7 +268,7 @@ export function FormatosSection({ initialRecipes }: { initialRecipes: AiRecipe[]
                       aria-label={`Borrar "${recipe.name}"`}
                       className="rounded-md p-1.5 text-tertiary transition hover:text-red-500 disabled:opacity-50"
                     >
-                      ✕
+                      <Icon name="delete" />
                     </button>
                   </div>
                 </div>

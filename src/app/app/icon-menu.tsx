@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useViewportClamp } from "@/hooks/useViewportClamp";
+import { Icon } from "@/components/ui/icon";
 
 const MENU_WIDTH = 192; // w-48 (12rem)
 
@@ -93,7 +94,7 @@ export function IconMenu({
         aria-expanded={open}
         className="tap-target flex items-center justify-center rounded-md text-tertiary transition hover:bg-border hover:text-secondary"
       >
-        ⋯
+        <Icon name="more" />
       </button>
       {open &&
         createPortal(

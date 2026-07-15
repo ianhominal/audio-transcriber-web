@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
+import { Icon, type IconName } from "@/components/ui/icon";
 
 // Nada que suscribir de verdad — este store no tiene estado externo real, solo existe
 // para forzar el patrón `useSyncExternalStore` (server snapshot `false`, client snapshot
@@ -24,10 +25,10 @@ function useMounted() {
 
 type ThemeOption = "light" | "system" | "dark";
 
-const OPTIONS: { value: ThemeOption; label: string; icon: (props: { className?: string }) => React.ReactNode }[] = [
-  { value: "light", label: "Claro", icon: SunIcon },
-  { value: "system", label: "Sistema", icon: SystemIcon },
-  { value: "dark", label: "Oscuro", icon: MoonIcon },
+const OPTIONS: { value: ThemeOption; label: string; icon: IconName }[] = [
+  { value: "light", label: "Claro", icon: "sun" },
+  { value: "system", label: "Sistema", icon: "system" },
+  { value: "dark", label: "Oscuro", icon: "moon" },
 ];
 
 /**
@@ -54,7 +55,7 @@ export function ThemeToggle() {
 
   return (
     <div role="group" aria-label="Tema" className="inline-flex shrink-0 gap-0.5 rounded-lg border border-border bg-surface-secondary p-0.5">
-      {OPTIONS.map(({ value, label, icon: Icon }) => {
+      {OPTIONS.map(({ value, label, icon }) => {
         const active = (theme ?? "system") === value;
         return (
           <button
@@ -68,63 +69,10 @@ export function ThemeToggle() {
               active ? "bg-surface text-accent shadow-sm" : "text-tertiary hover:text-secondary"
             }`}
           >
-            <Icon className="h-4 w-4" />
+            <Icon name={icon} className="h-4 w-4" />
           </button>
         );
       })}
     </div>
-  );
-}
-
-function SunIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-    </svg>
-  );
-}
-
-function MoonIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z" />
-    </svg>
-  );
-}
-
-function SystemIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="12" rx="1.5" />
-      <path d="M8 20h8M12 16v4" />
-    </svg>
   );
 }

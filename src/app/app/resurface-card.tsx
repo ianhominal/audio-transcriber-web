@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { formatRelativeTime, pickResurfaceCandidate, type ResurfaceCandidate } from "@/lib/resurface";
+import { Icon } from "@/components/ui/icon";
 
 /** Clave de `localStorage` con los ids de notas que la usuaria ya descartó de la card de
  * resurfacing en ESTE dispositivo — no hay columna `dismissed_at` (evita una migración para un
@@ -92,8 +93,8 @@ export function ResurfaceCard({ candidates }: { candidates: Candidate[] }) {
       aria-label="Nota vieja para revisitar"
       className="mb-4 flex items-start gap-3 rounded-xl border border-border bg-surface-secondary px-4 py-3"
     >
-      <span aria-hidden="true" className="text-lg leading-none">
-        💡
+      <span className="shrink-0 text-tertiary">
+        <Icon name="resurface" size={20} />
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-tertiary">{formatRelativeTime(pick.created_at)} capturaste esto</p>

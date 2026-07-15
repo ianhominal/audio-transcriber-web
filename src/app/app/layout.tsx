@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ToastProvider } from "@/components/ui/Toast";
+import { Icon } from "@/components/ui/icon";
 import { InstallPrompt } from "@/components/install-prompt";
 import LogoutButton from "./logout-button";
 
@@ -29,19 +30,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 href="/app/brain"
                 className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
               >
-                <span aria-hidden="true" className="flex shrink-0">
-                  <ChatIcon />
-                </span>
+                <Icon name="chat" className="shrink-0" title="Chat con IA" />
                 <span className="hidden sm:inline">Chat con IA</span>
               </Link>
               <Link
                 href="/descargar"
-                className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-tertiary transition-colors duration-150 ease-out hover:bg-surface-secondary hover:text-accent"
               >
-                <span className="sm:hidden" aria-hidden="true">
-                  ⬇
-                </span>
-                <span className="hidden sm:inline">Descargar app ↓</span>
+                <Icon name="download" className="shrink-0 sm:hidden" title="Descargar app" />
+                <span className="hidden sm:inline">Descargar app</span>
+                <Icon name="download" size={14} className="hidden shrink-0 sm:inline" />
               </Link>
               <Link
                 href="/app/ajustes"
@@ -69,14 +67,6 @@ function WaveIcon() {
       {[8, 14, 20, 14, 10].map((h, i) => (
         <rect key={i} x={4 + i * 4 - 1.5} y={12 - h / 2} width="3" height={h} rx="1.5" fill="currentColor" />
       ))}
-    </svg>
-  );
-}
-
-function ChatIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 5h16v11H8l-4 4V5Z" />
     </svg>
   );
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
+import { Icon, type IconName } from "@/components/ui/icon";
 
 export default async function Landing() {
   const supabase = await createClient();
@@ -46,19 +47,19 @@ export default async function Landing() {
       </section>
 
       <section className="mx-auto grid max-w-4xl gap-4 px-4 pb-20 sm:grid-cols-3 sm:px-5">
-        <Feature icon="⚡" title="En segundos" desc="Subís el audio y el texto aparece casi al toque. Nada de esperar." />
-        <Feature icon="🌍" title="Varios idiomas" desc="Español, inglés y más, con detección automática si no sabés cuál es." />
-        <Feature icon="🗂️" title="Todo en su lugar" desc="Guardás tus transcripciones en proyectos y las encontrás cuando las necesitás." />
+        <Feature icon="bolt" title="En segundos" desc="Subís el audio y el texto aparece casi al toque. Nada de esperar." />
+        <Feature icon="translate" title="Varios idiomas" desc="Español, inglés y más, con detección automática si no sabés cuál es." />
+        <Feature icon="all" title="Todo en su lugar" desc="Guardás tus transcripciones en proyectos y las encontrás cuando las necesitás." />
       </section>
     </main>
   );
 }
 
-function Feature({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+function Feature({ icon, title, desc }: { icon: IconName; title: string; desc: string }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-      <span className="text-xl" aria-hidden="true">
-        {icon}
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-950">
+        <Icon name={icon} size={20} />
       </span>
       <h3 className="mt-2 font-semibold">{title}</h3>
       <p className="mt-1 text-sm text-secondary">{desc}</p>

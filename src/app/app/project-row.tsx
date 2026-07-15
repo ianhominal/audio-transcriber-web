@@ -10,6 +10,7 @@ import { renameProject, duplicateProject, deleteProject, assignTranscriptionToPr
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { getProjectColor } from "@/lib/project-colors";
+import { Icon } from "@/components/ui/icon";
 import {
   TRANSCRIPTION_DRAG_MIME,
   decodeTranscriptionDragPayload,
@@ -170,12 +171,12 @@ export function ProjectRow({
             // mismo criterio que pide el ítem de touch targets sin inflar el layout.
             className="tap-target -m-3 flex shrink-0 items-center justify-center rounded text-tertiary transition-colors duration-150 ease-out hover:text-secondary"
           >
-            {expanded ? "▾" : "▸"}
+            <Icon name={expanded ? "chevron-down" : "chevron-right"} />
           </button>
         ) : depth > 0 ? (
           <span className="w-3.5 shrink-0" />
         ) : null}
-        <span className="text-base leading-none">{project.icon || "📁"}</span>
+        <span className="shrink-0">{project.icon ? <span>{project.icon}</span> : <Icon name="folder" />}</span>
         {projectColor && (
           <span
             title={projectColor.label}
@@ -185,7 +186,7 @@ export function ProjectRow({
         )}
         {project.syncOrigin === "drive" && (
           <span title="Sincronizado con Google Drive" className="shrink-0 text-xs leading-none">
-            ☁️
+            <Icon name="drive" size={14} />
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
@@ -194,9 +195,21 @@ export function ProjectRow({
       <IconMenu label={`Opciones de ${project.name}`}>
         {(close) => (
           <>
-            <MenuItem onClick={() => { setEditing(true); close(); }}>✏️ Renombrar</MenuItem>
-            <MenuItem onClick={() => { duplicate(); close(); }}>📑 Duplicar</MenuItem>
-            <MenuItem danger onClick={() => { remove(); close(); }}>🗑️ Eliminar</MenuItem>
+            <MenuItem onClick={() => { setEditing(true); close(); }}>
+              <span className="inline-flex items-center gap-1.5">
+                <Icon name="edit" /> Renombrar
+              </span>
+            </MenuItem>
+            <MenuItem onClick={() => { duplicate(); close(); }}>
+              <span className="inline-flex items-center gap-1.5">
+                <Icon name="duplicate" /> Duplicar
+              </span>
+            </MenuItem>
+            <MenuItem danger onClick={() => { remove(); close(); }}>
+              <span className="inline-flex items-center gap-1.5">
+                <Icon name="delete" /> Eliminar
+              </span>
+            </MenuItem>
           </>
         )}
       </IconMenu>

@@ -1,10 +1,12 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeTagFilter } from "@/lib/tags";
 import { RESURFACE_MIN_AGE_DAYS } from "@/lib/resurface";
 import { buttonClasses } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Icon } from "@/components/ui/icon";
 import { buildProjectBreadcrumb, buildProjectTree, getSubfolders, rollUpProjectCounts } from "@/lib/drive/tree";
 import { MIN_MERGE_NOTES } from "@/lib/merge/validate";
 import {
@@ -307,7 +309,7 @@ export default async function Dashboard({
                   scrollea el panel completo (`DashboardShell`) — un segundo scroll anidado ahí
                   sería justo la mala UX que este cambio busca sacar. */}
               <nav className="min-h-[10rem] space-y-0.5 md:max-h-[65vh] md:overflow-y-auto md:pr-0.5">
-                <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon="🗂️" />
+                <SidebarLink href="/app" active={!filter} label="Todas" count={total} icon={<Icon name="all" />} />
                 <ProjectTree
                   projects={projectsFull}
                   counts={countsByProjectId}
@@ -364,7 +366,7 @@ export default async function Dashboard({
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <NewSubfolderButton parentId={activeProject.id} available={subfoldersAvailable} />
               <Link href={newHref} className={buttonClasses({ size: "sm" })}>
-                🎙️ Nueva transcripción
+                <Icon name="mic" /> Nueva transcripción
               </Link>
               {/* "Merge several notes into one document" (feature 2026-07-13): only makes sense with
                   at least 2 DIRECT notes in this project/folder — same per-project navigation
@@ -375,7 +377,7 @@ export default async function Dashboard({
                   href={`/app/merge?project=${activeProject.id}`}
                   className={buttonClasses({ variant: "secondary", size: "sm" })}
                 >
-                  🧵 Unir en un documento
+                  <Icon name="merge" /> Unir en un documento
                 </Link>
               )}
             </div>
@@ -383,14 +385,14 @@ export default async function Dashboard({
             {subfolders.length === 0 && items.length === 0 ? (
               <EmptyState
                 className="mt-4"
-                icon="📂"
+                icon={<Icon name="folder-open" size={28} />}
                 title="Esta carpeta está vacía"
                 description="Creá una subcarpeta para organizarla mejor, o agregá tu primera transcripción acá."
                 action={
                   <>
                     <NewSubfolderButton parentId={activeProject.id} available={subfoldersAvailable} />
                     <Link href={newHref} className={buttonClasses({ size: "sm" })}>
-                      🎙️ Nueva transcripción
+                      <Icon name="mic" /> Nueva transcripción
                     </Link>
                   </>
                 }
@@ -431,23 +433,23 @@ export default async function Dashboard({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
               <Link href={newHref} className={buttonClasses({ size: "md" })}>
-                + Nueva transcripción
+                <Icon name="plus" /> Nueva transcripción
               </Link>
             </div>
 
             {items.length === 0 ? (
               <EmptyState
                 className="mt-8"
-                icon="🎙️"
+                icon={<Icon name="mic" size={28} />}
                 title="Todavía no hay transcripciones acá"
                 description="Grabá tu voz, capturá una reunión o subí un audio y va a aparecer en esta lista."
                 action={
                   <>
                     <Link href={newHref} className={buttonClasses({ size: "sm" })}>
-                      🎙️ Grabar
+                      <Icon name="mic" /> Grabar
                     </Link>
                     <Link href={newHref} className={buttonClasses({ variant: "secondary", size: "sm" })}>
-                      📤 Subir audio
+                      <Icon name="upload" /> Subir audio
                     </Link>
                   </>
                 }
@@ -472,19 +474,19 @@ export default async function Dashboard({
 function Breadcrumb({ chain }: { chain: { id: string; name: string; icon: string }[] }) {
   return (
     <nav aria-label="Ruta de carpetas" className="mb-3 flex flex-wrap items-center gap-1 text-sm text-tertiary">
-      <Link href="/app" className="transition hover:text-accent">
-        🗂️ Todas
+      <Link href="/app" className="inline-flex items-center gap-1 transition hover:text-accent">
+        <Icon name="all" /> Todas
       </Link>
       {chain.map((p, i) => (
         <span key={p.id} className="flex items-center gap-1">
           <span className="text-tertiary">/</span>
           {i === chain.length - 1 ? (
-            <span className="font-medium text-secondary">
-              {p.icon || "📁"} {p.name}
+            <span className="inline-flex items-center gap-1 font-medium text-secondary">
+              {p.icon ? <span>{p.icon}</span> : <Icon name="folder" />} {p.name}
             </span>
           ) : (
-            <Link href={`/app?project=${p.id}`} className="transition hover:text-accent">
-              {p.icon || "📁"} {p.name}
+            <Link href={`/app?project=${p.id}`} className="inline-flex items-center gap-1 transition hover:text-accent">
+              {p.icon ? <span>{p.icon}</span> : <Icon name="folder" />} {p.name}
             </Link>
           )}
         </span>
@@ -504,7 +506,7 @@ function SidebarLink({
   active: boolean;
   label: string;
   count: number;
-  icon: string;
+  icon: ReactNode;
 }) {
   return (
     <Link
@@ -513,7 +515,7 @@ function SidebarLink({
         active ? "bg-accent-subtle font-semibold text-accent-subtle-text" : "text-secondary hover:bg-surface-secondary"
       }`}
     >
-      <span className="text-base leading-none">{icon}</span>
+      <span className="shrink-0">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <span className="shrink-0 text-xs tabular-nums text-tertiary">{count}</span>
     </Link>

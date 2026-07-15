@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { lockBodyScroll } from "@/lib/scrollLock";
+import { Icon } from "@/components/ui/icon";
 
 /**
  * Envoltorio cliente del sidebar de proyectos del dashboard (`page.tsx`, Server Component, no
@@ -108,9 +109,7 @@ export function DashboardShell({ sidebar }: { sidebar: ReactNode }) {
           aria-expanded={open}
           className="tap-target flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 text-sm font-semibold text-secondary shadow-sm transition hover:bg-background"
         >
-          <span aria-hidden="true" className="text-base leading-none">
-            ☰
-          </span>
+          <Icon name="menu" />
           Proyectos
         </button>
       </div>
@@ -147,7 +146,7 @@ export function DashboardShell({ sidebar }: { sidebar: ReactNode }) {
                   aria-label="Cerrar"
                   className="tap-target flex items-center justify-center rounded-lg text-tertiary transition hover:bg-border hover:text-secondary"
                 >
-                  ✕
+                  <Icon name="close" />
                 </button>
               </div>
               {sidebar}

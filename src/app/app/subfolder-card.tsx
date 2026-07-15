@@ -10,6 +10,7 @@ import { renameProject, duplicateProject, deleteProject } from "./actions";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { getProjectColor } from "@/lib/project-colors";
+import { Icon } from "@/components/ui/icon";
 
 type Subfolder = { id: string; name: string; icon: string; syncOrigin?: string; color?: string | null };
 
@@ -98,7 +99,7 @@ export function SubfolderCard({
     <div className="group relative flex items-center gap-3 rounded-xl border border-border bg-surface p-3 transition hover:border-accent hover:shadow-sm">
       <Link href={`/app?project=${folder.id}`} className="flex min-w-0 flex-1 items-center gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent-subtle text-xl">
-          {folder.icon || "📁"}
+          {folder.icon ? <span>{folder.icon}</span> : <Icon name="folder" size={24} />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
@@ -112,7 +113,7 @@ export function SubfolderCard({
             )}
             {folder.syncOrigin === "drive" && (
               <span title="Sincronizado con Google Drive" className="shrink-0 text-xs leading-none">
-                ☁️
+                <Icon name="drive" size={14} />
               </span>
             )}
           </span>
@@ -132,7 +133,9 @@ export function SubfolderCard({
                   close();
                 }}
               >
-                ✏️ Renombrar
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="edit" /> Renombrar
+                </span>
               </MenuItem>
               <MenuItem
                 onClick={() => {
@@ -140,7 +143,9 @@ export function SubfolderCard({
                   close();
                 }}
               >
-                📑 Duplicar
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="duplicate" /> Duplicar
+                </span>
               </MenuItem>
               <MenuItem
                 danger
@@ -149,7 +154,9 @@ export function SubfolderCard({
                   close();
                 }}
               >
-                🗑️ Eliminar
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="delete" /> Eliminar
+                </span>
               </MenuItem>
             </>
           )}

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { buttonClasses } from "@/components/ui/Button";
+import { Icon, type IconName } from "@/components/ui/icon";
 
 /**
  * Página pública de descarga del cliente desktop (sincronizador).
@@ -48,26 +49,26 @@ export default async function DescargarPage() {
 
       <section className="mx-auto grid max-w-4xl gap-4 px-4 pb-20 sm:grid-cols-3 sm:px-5">
         <Feature
-          icon="🔄"
+          icon="sync"
           title="Sincronización automática"
           desc="Elegí una carpeta local y se mantiene al día con tu cuenta en la nube."
         />
         <Feature
-          icon="📡"
+          icon="offline"
           title="Funciona sin conexión"
           desc="Trabajá offline; los cambios se suben apenas volvés a tener internet."
         />
-        <Feature icon="🖥️" title="Requisitos" desc="Windows 10/11 de 64 bits. Instalación en segundos." />
+        <Feature icon="desktop" title="Requisitos" desc="Windows 10/11 de 64 bits. Instalación en segundos." />
       </section>
     </main>
   );
 }
 
-function Feature({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+function Feature({ icon, title, desc }: { icon: IconName; title: string; desc: string }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-      <span className="text-xl" aria-hidden="true">
-        {icon}
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-950">
+        <Icon name={icon} size={20} />
       </span>
       <h3 className="mt-2 font-semibold">{title}</h3>
       <p className="mt-1 text-sm text-secondary">{desc}</p>

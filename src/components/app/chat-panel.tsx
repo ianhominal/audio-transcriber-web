@@ -7,6 +7,7 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { Button } from "@/components/ui/Button";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
+import { Icon } from "@/components/ui/icon";
 import { useToast } from "@/components/ui/Toast";
 import { isValidChatMessageText, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/config";
 import { parseChatErrorMessage } from "@/lib/chat/errors";
@@ -212,8 +213,9 @@ export function ChatPanel({
       </p>
 
       {effectiveScope === "note" && disabled && disabledReason && (
-        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
-          ⚠️ {disabledReason}
+        <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
+          <Icon name="warning" className="shrink-0" />
+          {disabledReason}
         </p>
       )}
 

@@ -17,6 +17,7 @@ import {
   TRANSCRIPTION_DRAG_MIME,
   encodeTranscriptionDragPayload,
 } from "@/lib/dnd/transcriptionDrag";
+import { Icon } from "@/components/ui/icon";
 
 type Transcription = {
   id: string;
@@ -147,7 +148,11 @@ export function TranscriptionRow({
         <Link href={`/app/t/${transcription.id}`} draggable={false} className="block">
           <div className="flex items-baseline justify-between gap-4">
             <p className="truncate font-semibold text-foreground">
-              <span className="mr-1.5">{transcription.icon || "📄"}</span>
+              {transcription.icon ? (
+                <span className="mr-1.5">{transcription.icon}</span>
+              ) : (
+                <Icon name="note" className="mr-1.5" />
+              )}
               {displayName}
             </p>
             <span className="shrink-0 text-xs text-tertiary">{formatDate(transcription.created_at)}</span>
@@ -182,12 +187,17 @@ export function TranscriptionRow({
               </p>
               <div className="max-h-56 overflow-auto">
                 <MenuItem onClick={() => { moveTo(null, "Sin proyecto"); close(); }}>
-                  {transcription.project_id === null ? "✓ " : ""}📄 Sin proyecto
+                  <span className="inline-flex items-center gap-1.5">
+                    {transcription.project_id === null && <Icon name="check" />}
+                    <Icon name="unassigned" /> Sin proyecto
+                  </span>
                 </MenuItem>
                 {projects.map((p) => (
                   <MenuItem key={p.id} onClick={() => { moveTo(p.id, p.name); close(); }}>
-                    {transcription.project_id === p.id ? "✓ " : ""}
-                    {p.icon || "📁"} {p.name}
+                    <span className="inline-flex items-center gap-1.5">
+                      {transcription.project_id === p.id && <Icon name="check" />}
+                      {p.icon ? <span>{p.icon}</span> : <Icon name="folder" />} {p.name}
+                    </span>
                   </MenuItem>
                 ))}
                 <MenuItem
@@ -200,11 +210,17 @@ export function TranscriptionRow({
                     close();
                   }}
                 >
-                  ＋ Proyecto nuevo…
+                  <span className="inline-flex items-center gap-1.5">
+                    <Icon name="plus" /> Proyecto nuevo…
+                  </span>
                 </MenuItem>
               </div>
               <div className="my-1 border-t border-border" />
-              <MenuItem danger onClick={() => { remove(); close(); }}>🗑️ Borrar</MenuItem>
+              <MenuItem danger onClick={() => { remove(); close(); }}>
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="delete" /> Borrar
+                </span>
+              </MenuItem>
             </>
           )}
         </IconMenu>

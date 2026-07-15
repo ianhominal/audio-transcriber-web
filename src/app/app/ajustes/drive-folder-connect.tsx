@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
+import { Icon } from "@/components/ui/icon";
 import { canConnectFolderLevel, validateNewFolderName } from "@/lib/drive/folder-connect";
 
 type DriveFolder = { id: string; name: string };
@@ -163,7 +164,10 @@ export function DriveFolderConnect() {
   if (!open) {
     return (
       <Button variant="secondary" onClick={openModal}>
-        📂 Conectar carpeta de Drive
+        <span className="inline-flex items-center gap-1.5">
+          <Icon name="folder-open" />
+          Conectar carpeta de Drive
+        </span>
       </Button>
     );
   }
@@ -180,7 +184,7 @@ export function DriveFolderConnect() {
           className="rounded-md px-2 py-1 text-tertiary transition hover:bg-surface-secondary disabled:opacity-40"
           aria-label="Cerrar"
         >
-          ✕
+          <Icon name="close" />
         </button>
       </div>
 
@@ -194,7 +198,7 @@ export function DriveFolderConnect() {
       {summary ? (
         <div className="mt-4 space-y-2 text-sm">
           <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-medium text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200">
-            <span aria-hidden="true">✓</span> Carpeta conectada
+            <Icon name="success" className="shrink-0" /> Carpeta conectada
           </p>
           <ul className="space-y-1 text-secondary">
             <li>
@@ -261,7 +265,7 @@ export function DriveFolderConnect() {
                       disabled={connecting}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary transition hover:bg-background disabled:opacity-50"
                     >
-                      <span aria-hidden="true">📁</span>
+                      <Icon name="folder" className="shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{f.name}</span>
                       <span className="text-tertiary" aria-hidden="true">
                         ›
@@ -303,7 +307,10 @@ export function DriveFolderConnect() {
                 disabled={connecting || loading}
                 className="text-xs font-medium text-accent transition hover:underline disabled:opacity-50"
               >
-                ➕ Crear carpeta nueva acá
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="folder-plus" />
+                  Crear carpeta nueva acá
+                </span>
               </button>
             )}
             {createFolderError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{createFolderError}</p>}

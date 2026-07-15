@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
+import { Icon } from "@/components/ui/icon";
 
 /** Estado vacío con call-to-action, para listas/paneles sin contenido todavía. */
 export function EmptyState({
-  icon = "🗂️",
+  icon = <Icon name="all" size={28} />,
   title,
   description,
   action,
   className = "",
 }: {
-  icon?: string;
+  icon?: ReactNode;
   title: string;
   description?: string;
   action?: ReactNode;

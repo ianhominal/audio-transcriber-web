@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { Icon } from "@/components/ui/icon";
 import { formatDuration, formatRecordingFileName, defaultTitleFromFileName } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
@@ -242,13 +243,14 @@ export function CaptureWorkspace({
 
       {phase === "done" && (
         <div className="flex flex-col items-center gap-4">
-          <p className="text-2xl" aria-hidden="true">
-            ✅
+          <p aria-hidden="true">
+            <Icon name="success" size={28} className="text-emerald-500" />
           </p>
           <p className="text-lg font-semibold text-secondary">Listo, quedó guardada.</p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button onClick={recordAgain} size="lg">
-              🎙️ Grabar otra
+              <Icon name="mic" className="shrink-0" />
+              Grabar otra
             </Button>
             {resultId ? (
               <Link href={`/app/t/${resultId}`} className="text-sm font-semibold text-accent hover:underline">
@@ -265,8 +267,8 @@ export function CaptureWorkspace({
 
       {phase === "error" && (
         <div className="flex flex-col items-center gap-4">
-          <p className="text-2xl" aria-hidden="true">
-            ⚠️
+          <p aria-hidden="true">
+            <Icon name="warning" size={28} className="text-amber-500" />
           </p>
           <p role="alert" className="text-secondary">
             {message || "Ocurrió un error."}
@@ -278,7 +280,8 @@ export function CaptureWorkspace({
               </Button>
             ) : (
               <Button onClick={recordAgain} size="lg">
-                🎙️ Grabar
+                <Icon name="mic" className="shrink-0" />
+                Grabar
               </Button>
             )}
             <Link href="/app/transcribe" className="text-sm font-semibold text-accent hover:underline">

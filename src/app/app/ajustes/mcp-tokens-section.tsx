@@ -5,6 +5,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
+import { Icon } from "@/components/ui/icon";
 import { formatDate } from "@/lib/format";
 import { MAX_MCP_TOKEN_LABEL_LENGTH } from "@/lib/mcp-tokens/validate";
 import type { McpTokenSummary } from "@/lib/mcp-tokens/store";
@@ -176,10 +177,10 @@ export function MCPTokensSection({
     <div>
       <div className="flex items-center gap-2.5">
         <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background"
           aria-hidden="true"
         >
-          🔌
+          <Icon name="mcp" size={18} />
         </span>
         <div>
           <h2 className="font-semibold text-foreground">Conexión MCP</h2>
@@ -192,7 +193,10 @@ export function MCPTokensSection({
 
       <div className="mt-4">
         <Button variant="secondary" size="sm" onClick={openCreateModal} disabled={atLimit}>
-          🔑 Generar token
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="key" />
+            Generar token
+          </span>
         </Button>
         <p role="status" aria-live="polite" className="mt-1.5 text-xs text-tertiary">
           {atLimit ? `Llegaste al máximo de ${MCP_TOKEN_ACTIVE_LIMIT} tokens activos. Revocá alguno para generar otro.` : ""}
@@ -286,7 +290,7 @@ export function MCPTokensSection({
               className="rounded-md px-2 py-1 text-tertiary transition hover:bg-surface-secondary disabled:opacity-40"
               aria-label="Cerrar"
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
           <p className="mt-1 text-xs text-tertiary">Ponele un nombre para reconocerlo después (ej. qué app lo va a usar).</p>
@@ -328,7 +332,7 @@ export function MCPTokensSection({
               className="rounded-md px-2 py-1 text-tertiary transition hover:bg-surface-secondary"
               aria-label="Cerrar"
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
 
@@ -337,7 +341,7 @@ export function MCPTokensSection({
             aria-live="polite"
             className="mt-3 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200"
           >
-            <span aria-hidden="true">⚠️</span>
+            <Icon name="warning" className="shrink-0" />
             <span>Guardá este token ahora — no lo vamos a poder mostrar de nuevo. Si lo perdés, vas a tener que generar uno nuevo.</span>
           </div>
 

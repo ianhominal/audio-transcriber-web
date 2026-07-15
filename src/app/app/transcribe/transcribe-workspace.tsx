@@ -16,6 +16,7 @@ import {
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { Icon, type IconName } from "@/components/ui/icon";
 import { useToast } from "@/components/ui/Toast";
 import { useTranscriptionDefaults } from "@/lib/settings/use-transcription-defaults";
 import { useOverridableDefault } from "@/lib/settings/use-overridable-default";
@@ -609,7 +610,10 @@ export function TranscribeWorkspace({
         {hasVocabulary && (
           <div className="mt-4 border-t border-border pt-4">
             <label className="flex cursor-pointer items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-secondary">📖 Corregir con tu vocabulario</span>
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-secondary">
+                <Icon name="vocabulary" className="shrink-0" />
+                Corregir con tu vocabulario
+              </span>
               <input
                 type="checkbox"
                 checked={useVocabulary}
@@ -660,8 +664,8 @@ export function TranscribeWorkspace({
             e.target.value = "";
           }}
         />
-        <p className="text-2xl" aria-hidden="true">
-          📤
+        <p aria-hidden="true">
+          <Icon name="upload" size={24} className="mx-auto" />
         </p>
         <p className="mt-2 font-medium text-secondary">Arrastrá tus audios acá</p>
         <p className="mt-1 text-sm text-tertiary">
@@ -678,7 +682,8 @@ export function TranscribeWorkspace({
             onClick={startMicRecording}
             disabled={capturing}
           >
-            🎙️ Grabar
+            <Icon name="mic" className="shrink-0" />
+            Grabar
           </Button>
         ) : (
           <Button type="button" variant="danger" onClick={stopMicRecording}>
@@ -694,7 +699,8 @@ export function TranscribeWorkspace({
             onClick={startMeetingCapture}
             disabled={recording}
           >
-            🖥️ Capturar reunión
+            <Icon name="capture" className="shrink-0" />
+            Capturar reunión
           </Button>
         ) : (
           <Button type="button" variant="danger" onClick={stopMeetingCapture}>
@@ -757,12 +763,11 @@ export function TranscribeWorkspace({
                   <span className="truncate text-sm font-medium text-foreground transition-colors duration-150 ease-out group-hover:text-accent">
                     {it.title}
                   </span>
-                  <span
-                    className="shrink-0 text-xs text-tertiary transition-colors duration-150 ease-out group-hover:text-accent"
-                    aria-hidden="true"
-                  >
-                    ✏️
-                  </span>
+                  <Icon
+                    name="edit"
+                    size={12}
+                    className="shrink-0 text-tertiary transition-colors duration-150 ease-out group-hover:text-accent"
+                  />
                 </button>
               ) : (
                 <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
@@ -801,7 +806,7 @@ export function TranscribeWorkspace({
                 className="tap-target flex shrink-0 items-center justify-center rounded text-tertiary transition hover:text-red-500"
                 aria-label={`Quitar ${it.title} de la cola`}
               >
-                ✕
+                <Icon name="close" />
               </button>
             )}
           </li>
@@ -811,7 +816,7 @@ export function TranscribeWorkspace({
       {/* Derivación a la app de escritorio para archivos grandes (límite de Vercel) */}
       {hasOversize && (
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
-          <span aria-hidden="true">⚠️</span>
+          <Icon name="warning" className="mt-0.5 shrink-0" />
           <p>
             Algunos audios pesan más de 4,5 MB y la web no los soporta.{" "}
             <Link href="/descargar" className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100">
@@ -898,12 +903,12 @@ function DefaultAffordance({
 
 function StatusDot({ status }: { status: Status }) {
   if (status === "working") return <Spinner size="sm" className="shrink-0 text-accent" />;
-  const map: Record<Exclude<Status, "working">, { label: string; cls: string }> = {
-    pending: { label: "⏳", cls: "" },
-    done: { label: "✅", cls: "" },
-    duplicate: { label: "⏭️", cls: "" },
-    error: { label: "❌", cls: "" },
+  const map: Record<Exclude<Status, "working">, { name: IconName; cls: string }> = {
+    pending: { name: "pending", cls: "text-amber-500" },
+    done: { name: "success", cls: "text-emerald-500" },
+    duplicate: { name: "skip", cls: "text-tertiary" },
+    error: { name: "error", cls: "text-red-500" },
   };
   const s = map[status];
-  return <span className={`text-lg leading-none ${s.cls}`}>{s.label}</span>;
+  return <Icon name={s.name} className={`shrink-0 ${s.cls}`} />;
 }

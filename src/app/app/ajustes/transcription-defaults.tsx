@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { useTranscriptionDefaults } from "@/lib/settings/use-transcription-defaults";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
+import { Icon } from "@/components/ui/icon";
 
 type SavingField = "language" | "quality" | null;
 
@@ -54,8 +55,8 @@ export function TranscriptionDefaultsSection({
   return (
     <div>
       <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-lg" aria-hidden="true">
-          🎙️
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background" aria-hidden="true">
+          <Icon name="mic" size={18} />
         </span>
         <div>
           <h2 className="font-semibold text-foreground">Transcripción</h2>

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { buttonClasses } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/icon";
 import { MIN_MERGE_NOTES, MAX_MERGE_NOTES } from "@/lib/merge/validate";
 import { MergeView } from "@/components/app/merge-view";
 
@@ -75,7 +76,7 @@ export default async function MergePage({
       {notes.length < MIN_MERGE_NOTES ? (
         <EmptyState
           className="mt-6"
-          icon="🧵"
+          icon={<Icon name="merge" size={28} />}
           title="Necesitás al menos 2 notas en este proyecto para unirlas en un documento."
           action={
             <Link href={`/app?project=${project.id}`} className={buttonClasses({ variant: "secondary", size: "sm" })}>
