@@ -33,9 +33,17 @@ describe("splitSpeakerBlocks", () => {
     expect(splitSpeakerBlocks("Esto es una nota cualquiera.\n\nCon dos párrafos.")).toBeNull();
   });
 
-  it("devuelve null si hay texto suelto mezclado con turnos", () => {
-    // Mezclar etiquetado con suelto haría que el suelto pierda su lugar al rearmar.
-    expect(splitSpeakerBlocks("Persona 1: hola\n\ntexto suelto sin etiqueta")).toBeNull();
+  it("un párrafo sin etiqueta DESPUÉS de un turno es continuación de ese hablante", () => {
+    // El propio pulido agrega cortes de párrafo adentro de un turno largo, y esos párrafos nuevos
+    // no llevan etiqueta. Antes esto devolvía null y un segundo pulido borraba las etiquetas.
+    const blocks = splitSpeakerBlocks("Persona 1: hola\n\nsigo hablando yo");
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks![0]).toEqual({ label: "Persona 1", text: "hola\n\nsigo hablando yo" });
+  });
+
+  it("devuelve null si el texto arranca SIN etiqueta (no es diarizado)", () => {
+    expect(splitSpeakerBlocks("texto suelto\n\nPersona 1: hola")).toBeNull();
   });
 
   it("no abre un turno si el nombre aparece MENCIONADO en el medio de una frase", () => {
@@ -83,6 +91,30 @@ describe("ida y vuelta", () => {
     const blocks = splitSpeakerBlocks(REAL);
 
     expect(joinSpeakerBlocks(blocks!)).toBe(REAL);
+  });
+
+  /// Salida REAL del pulido (2026-07-16): el modelo partió un turno largo en tres párrafos. Un
+  /// segundo "Mejorar texto" tiene que seguir viendo los turnos, no tratar todo como texto suelto.
+  it("un texto YA pulido se puede volver a pulir sin perder las etiquetas", () => {
+    const yaPulido = `Persona 1: Pero entiéndanme, me hicieron tantas bromas. Adiós.
+
+Ustedes saben que yo tengo buena relación con Vinicius Junior.
+
+Porque la última vez que nos vimos, fue acá en Argentina.
+
+Persona 3: Qué duro, loco.
+
+Sin identificar: Amén.`;
+
+    const blocks = splitSpeakerBlocks(yaPulido);
+
+    expect(blocks).not.toBeNull();
+    expect(blocks!.map((b) => b.label)).toEqual(["Persona 1", "Persona 3", "Sin identificar"]);
+    // Los dos párrafos huérfanos quedaron adentro del turno de Persona 1, donde corresponden.
+    expect(blocks![0].text).toContain("Vinicius Junior");
+    expect(blocks![0].text).toContain("Argentina");
+    // Y rearmarlo devuelve exactamente lo mismo: pulir dos veces no degrada nada.
+    expect(joinSpeakerBlocks(blocks!)).toBe(yaPulido);
   });
 
   it("las etiquetas sobreviven aunque el modelo reescriba TODO el texto", () => {

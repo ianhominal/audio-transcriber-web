@@ -40,9 +40,19 @@ export function splitSpeakerBlocks(text: string): SpeakerBlock[] | null {
     if (!chunk) continue;
 
     const match = chunk.match(BLOCK_PATTERN);
-    // Un solo bloque sin etiqueta y ya no lo tratamos como diarizado: mezclar turnos etiquetados
-    // con texto suelto haría que el texto suelto pierda su lugar al rearmar.
-    if (!match) return null;
+
+    if (!match) {
+      // Sin etiqueta y todavía no hay ningún turno abierto → esto no es una transcripción
+      // diarizada (es una nota normal): que siga por el camino de siempre.
+      if (blocks.length === 0) return null;
+
+      // Sin etiqueta pero DESPUÉS de un turno → es continuación del mismo hablante. Pasa de
+      // verdad: el propio pulido agrega cortes de párrafo adentro de un turno largo, y esos
+      // párrafos nuevos no llevan etiqueta. Sin esto, un segundo "Mejorar texto" sobre un texto
+      // ya pulido no reconocía los turnos y borraba las etiquetas (verificado 2026-07-16).
+      blocks[blocks.length - 1].text += `\n\n${chunk}`;
+      continue;
+    }
 
     blocks.push({
       label: match[1],
