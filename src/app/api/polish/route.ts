@@ -7,6 +7,7 @@ import { isAiPolishDailyLimitError } from "@/lib/aiUsage";
 import { buildPolishCall } from "@/lib/polish/prompt";
 import { joinPolished, MAX_POLISH_INPUT_CHARS, splitForPolish } from "@/lib/polish/chunk";
 import { joinSpeakerBlocks, type SpeakerBlock, splitSpeakerBlocks } from "@/lib/polish/speakers";
+import { isTooShortToPolish, judgePolished } from "@/lib/polish/validate";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -65,6 +66,17 @@ async function polishChunk(chunk: string, terms: string[], apiKey: string): Prom
   if (!polished) {
     return { ok: false, error: "El servicio de pulido no devolvió texto." };
   }
+
+  // Última línea de defensa, y la más importante: que el modelo haya respondido NO significa que
+  // haya respondido lo que se le pidió. Ver `judgePolished` para el caso real que motivó esto (una
+  // frase se convirtió en tres, inventando una plantilla del Madrid que no está en el audio).
+  // Cualquier señal rara → se conserva el original: perder una coma no le arruina el día a nadie,
+  // que la app invente una cita sí.
+  const verdict = judgePolished(chunk, polished);
+  if (verdict.use === "original") {
+    return { ok: false, error: `El pulido de este tramo se descartó (${verdict.reason}).` };
+  }
+
   return { ok: true, text: polished };
 }
 
@@ -184,6 +196,11 @@ export async function POST(req: NextRequest) {
 
   /** Pule un texto largo partiéndolo en pedazos (ver `splitForPolish`), secuencial. */
   const polishLongText = async (input: string): Promise<string> => {
+    // Un fragmento mínimo ("Qué duro, loco.") no necesita puntuación, y mandarlo solo invita al
+    // modelo a llenar el vacío inventando — que es exactamente lo que pasó. Al pulir turno por
+    // turno estos fragmentos son moneda corriente, así que ni se le mandan.
+    if (isTooShortToPolish(input)) return input;
+
     const chunks = splitForPolish(input);
     const out: string[] = [];
     for (const chunk of chunks) {
