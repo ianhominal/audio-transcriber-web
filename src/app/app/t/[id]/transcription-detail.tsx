@@ -119,6 +119,12 @@ export function TranscriptionDetail({
   // "Mejorar texto" (pulido con IA vía /api/polish, ver ROADMAP.md): estado propio, mismo criterio
   // que `saving` — un booleano simple, sin compartir flag con ninguna otra acción de esta pantalla.
   const [polishing, setPolishing] = useState(false);
+  // Texto EXACTO que quedó mejorado, o null si todavía no se mejoró. "¿Ya está mejorado?" se DERIVA
+  // comparándolo contra el `text` actual (mismo criterio que `summaryText`/`dirty` de arriba): así
+  // editar el texto vuelve a habilitar el botón solo, sin un booleano aparte que se desincronice.
+  // Vive en la sesión a propósito: recordar esto entre sesiones necesitaría una columna nueva, y
+  // el caso que importa (apretar dos veces seguidas) ya queda cubierto.
+  const [polishedText, setPolishedText] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportingDrive, setExportingDrive] = useState(false);
   // Export a .docx/.pdf (ver brief "Exportar Word/PDF" 2026-07-13): mismo criterio que
@@ -231,6 +237,11 @@ export function TranscriptionDetail({
     description !== baseline.description ||
     icon !== baseline.icon;
 
+  // El texto actual es EXACTAMENTE el que ya se mejoró → no tiene sentido volver a mandarlo al
+  // modelo: gasta cuota diaria y cada pasada corre un poco más el texto de lo que se dijo (deriva).
+  // Derivado, no un booleano propio: si la usuaria edita el texto, se re-habilita solo.
+  const alreadyPolished = polishedText !== null && polishedText === text;
+
   // Fase F5: no tiene sentido resumir un texto casi vacío (ver `MIN_SUMMARY_TEXT_LENGTH`), y
   // resumir mientras hay cambios de texto sin guardar generaría un resumen que no corresponde a lo
   // que está persistido — se pide guardar primero, mismo criterio de "una sola fuente de verdad"
@@ -280,12 +291,20 @@ export function TranscriptionDetail({
       // "Guardar" habilitado acá es la única red de seguridad si ese guardado hubiera fallado en
       // silencio — un clic de más ahí es inofensivo (reescribe lo mismo que ya quedó persistido).
       setText(data.text);
-      if (data.polishedChunks === 0) {
-        toast("No se pudo pulir el texto, quedó igual que antes.", "error");
+      // Solo se marca como "ya mejorado" (y se apaga el botón) cuando NO quedó nada pendiente.
+      // Un resultado parcial deja el botón habilitado a propósito: ahí reintentar SÍ sirve.
+      if (data.totalChunks === 0) {
+        // Todo el texto era demasiado corto para mejorarlo (ver `isTooShortToPolish`): no falló
+        // nada, simplemente no había trabajo que hacer.
+        setPolishedText(data.text);
+        toast("No hacía falta mejorar nada: el texto ya estaba bien.", "info");
+      } else if (data.polishedChunks === 0) {
+        toast("No se pudo mejorar el texto, quedó igual que antes.", "error");
       } else if (data.polishedChunks < data.totalChunks) {
-        toast("El texto se pulió parcialmente: algunas partes quedaron igual que el original.", "info");
+        toast("El texto se mejoró parcialmente: algunas partes quedaron igual que el original.", "info");
       } else {
-        toast("Texto pulido.", "success");
+        setPolishedText(data.text);
+        toast("Texto mejorado.", "success");
       }
     } catch {
       toast("No se pudo contactar al servidor.", "error");
@@ -782,20 +801,22 @@ export function TranscriptionDetail({
           {saving ? "Guardando…" : justSaved ? "Guardado ✓" : "Guardar"}
         </Button>
         <Button
-          variant="secondary"
+          variant={alreadyPolished ? "success" : "secondary"}
           loading={polishing}
-          disabled={polishing || !text.trim() || dirty}
+          disabled={polishing || !text.trim() || dirty || alreadyPolished}
           title={
             !text.trim()
               ? "No hay texto para mejorar."
               : dirty
                 ? "Guardá los cambios de texto antes de mejorar el texto."
-                : undefined
+                : alreadyPolished
+                  ? "Este texto ya está mejorado. Si lo editás, vas a poder mejorarlo de nuevo."
+                  : undefined
           }
           onClick={polishTranscriptionText}
         >
-          {!polishing && <Icon name="sparkles" className="shrink-0" />}
-          {polishing ? "Puliendo…" : "Mejorar texto"}
+          {!polishing && <Icon name={alreadyPolished ? "check" : "sparkles"} className="shrink-0" />}
+          {polishing ? "Mejorando…" : alreadyPolished ? "Texto mejorado ✓" : "Mejorar texto"}
         </Button>
         <CopyButton text={text} label="Copiar" ariaLabel="Copiar la transcripción completa" size="md" />
         <Button variant="secondary" onClick={download}>
