@@ -55,5 +55,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No se pudo preparar la subida. Probá de nuevo." }, { status: 500 });
   }
 
-  return NextResponse.json({ path, signedUrl: data.signedUrl });
+  // `apiKey` = la clave publishable/anon (PÚBLICA: ya viaja en el bundle del navegador). El cliente
+  // desktop la necesita para el header `apikey` del PUT al signed URL — el gateway de Supabase lo
+  // exige en toda ruta de `/storage/v1/`, incluso con el token firmado en la URL. Sin esto el PUT
+  // da 401 "No API key found in request". Es el mismo header que manda el storage-js oficial.
+  const apiKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!apiKey) {
+    console.error("[audio/prepare] NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY no configurada");
+    return NextResponse.json({ error: "No se pudo preparar la subida. Probá de nuevo." }, { status: 500 });
+  }
+
+  return NextResponse.json({ path, signedUrl: data.signedUrl, apiKey });
 }
