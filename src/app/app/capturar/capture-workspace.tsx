@@ -7,7 +7,7 @@ import { Button, buttonClasses } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
-import { formatDuration, formatRecordingFileName, defaultTitleFromFileName } from "@/lib/format";
+import { formatDuration, formatRecordingFileName, defaultTitleFromFileName, formatFileSize } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
 
@@ -56,6 +56,30 @@ export function CaptureWorkspace({
   // un ref durante el render rompe las reglas de React (el valor puede quedar desactualizado).
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
+  // Grabación que NO entra por la web (supera WEB_MAX_BYTES). Estado PROPIO, separado de
+  // `pendingFile` a propósito: el render de abajo ofrece "Reintentar" cuando hay `pendingFile`, y
+  // reintentar una grabación oversize vuelve a fallar EXACTAMENTE igual — sería un botón que no
+  // puede funcionar nunca.
+  //
+  // Existe porque antes esto se TIRABA: el chequeo corre en `uploadRecording`, o sea DESPUÉS de
+  // que la usuaria apretó Detener, y el único lugar donde vivía el archivo era el closure de
+  // `onstop`. Grababas una hora, apretabas Detener, y la app te decía "muy grande" y perdías todo.
+  // El audio de una reunión no se repite. Que no entre por la web es una limitación real (el tope
+  // de subida de Vercel); tirarlo era una decisión nuestra, y estaba mal. `transcribe-workspace`
+  // ya hacía lo correcto ante este mismo chequeo: deja el archivo en la cola.
+  //
+  // El archivo y su URL de descarga viajan JUNTOS en un solo estado: se crean en el mismo momento
+  // y se revocan juntos. Separarlos obligaba a crear la URL dentro de un efecto, y un `setState`
+  // síncrono adentro de un efecto dispara renders en cascada.
+  const [oversize, setOversize] = useState<{ file: File; url: string } | null>(null);
+
+  // Revoca la URL al reemplazarse o al desmontar: una grabación larga pesa decenas de MB y sin
+  // revocar queda retenida en memoria toda la sesión. Este efecto NO setea estado: solo limpia.
+  useEffect(() => {
+    if (!oversize) return;
+    return () => URL.revokeObjectURL(oversize.url);
+  }, [oversize]);
+
   const stopTimer = () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -66,9 +90,16 @@ export function CaptureWorkspace({
   const uploadRecording = useCallback(
     async (file: File) => {
       if (file.size > WEB_MAX_BYTES) {
-        setPendingFile(null);
+        // El audio se CONSERVA (ver `oversizeFile`): no entra por la web, pero es de la usuaria y
+        // se lo puede bajar. Mismo criterio que `transcribe-workspace`, que ante este mismo chequeo
+        // deja el archivo en la cola en vez de descartarlo.
+        setOversize({ file, url: URL.createObjectURL(file) });
         setPhase("error");
-        setMessage("La grabación es muy larga para la web (+4,5 MB). Grabá algo más corto o usá la app de escritorio.");
+        setMessage(
+          `Esta grabación pesa ${formatFileSize(file.size)} y por la web solo se pueden subir hasta ` +
+            `${formatFileSize(WEB_MAX_BYTES)}. No la perdiste: bajala y transcribila con la app de escritorio, ` +
+            `que no tiene límite de tamaño.`
+        );
         return;
       }
       setPendingFile(file);
@@ -134,6 +165,10 @@ export function CaptureWorkspace({
     // the exact pattern the rule (and React's own docs) sanction — with no perceptible delay.
     await Promise.resolve();
     setMessage("");
+    // Limpia la grabación oversize de una corrida anterior (el useEffect revoca su URL): empezar a
+    // grabar de nuevo no puede dejar en pantalla el botón de descarga del audio viejo. Va acá y no
+    // solo en `recordAgain` porque a startRecording también se llega desde la pantalla en reposo.
+    setOversize(null);
     setPhase("requesting");
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setPhase("error");
@@ -189,6 +224,9 @@ export function CaptureWorkspace({
     setResultId(null);
     setPendingFile(null);
     setRescuedId(null);
+    // Sin esto, el botón "Descargar la grabación" de la corrida anterior sobrevive a la nueva y
+    // termina ofreciendo un audio viejo. El useEffect de arriba revoca su URL al limpiarse.
+    setOversize(null);
     void startRecording();
   }, [startRecording]);
 
@@ -349,6 +387,18 @@ export function CaptureWorkspace({
                 <Icon name="note" className="shrink-0" />
                 Ver la nota con el audio
               </Link>
+            ) : oversize ? (
+              /* Grabación que no entra por la web: la acción primaria es BAJARLA. A propósito NO se
+                 ofrece "Reintentar" acá — volvería a fallar idéntico en el mismo chequeo. */
+              <>
+                <a href={oversize.url} download={oversize.file.name} className={buttonClasses({ size: "lg" })}>
+                  <Icon name="download" className="shrink-0" />
+                  Descargar la grabación
+                </a>
+                <Link href="/descargar" className="text-sm font-semibold text-accent hover:underline">
+                  Ver la app de escritorio →
+                </Link>
+              </>
             ) : pendingFile ? (
               <Button onClick={retryUpload} size="lg">
                 Reintentar
