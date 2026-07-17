@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // `.claude/` es tooling local gitignoreado (docs, bundles de handoff de Claude Design con su
+    // runtime compilado). No es código del proyecto — no se lintea ni se deploya.
+    ".claude/**",
   ]),
 ]);
 

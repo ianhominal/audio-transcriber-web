@@ -82,6 +82,9 @@
   --color-overlay: var(--overlay);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Serif de lectura (utilidad `font-serif`), solo para la vista "Leer" de una transcripción
+     (ver `TranscriptReader`). Cargada en layout.tsx vía next/font. */
+  --font-serif: var(--font-newsreader), Georgia, "Times New Roman", serif;
 }
 
 body {

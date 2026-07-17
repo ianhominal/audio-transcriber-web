@@ -30,6 +30,7 @@ import { canSummarizeText } from "@/lib/summary/validate";
 import type { SummaryResult } from "@/lib/summary/format";
 import type { AiRecipe } from "@/lib/recipes/types";
 import { ChatPanel } from "@/components/app/chat-panel";
+import { TranscriptReader } from "@/components/app/transcript-reader";
 
 const EXPORT_MENU_WIDTH = 256; // w-64
 
@@ -98,6 +99,10 @@ export function TranscriptionDetail({
   const { show: toast } = useToast();
   const [title, setTitle] = useState(transcription.title);
   const [text, setText] = useState(transcription.text);
+  // Leer (documento renderizado, con hablantes) vs Editar (el textarea de siempre). Arranca en
+  // "read": la usuaria casi siempre viene a LEER, no a tocar el texto (ver rediseño 1a). Editar es
+  // deliberadamente el mismo textarea, no un editor rich-text — ver `TranscriptReader`.
+  const [viewMode, setViewMode] = useState<"read" | "edit">("read");
   const [description, setDescription] = useState(transcription.description);
   const [icon, setIcon] = useState(transcription.icon);
   // Baseline contra el que se compara "hay cambios sin guardar" (`dirty`). Se actualiza recién
@@ -787,14 +792,53 @@ export function TranscriptionDetail({
         </div>
       )}
 
-      {/* Texto editable */}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={14}
-        aria-label="Texto de la transcripción"
-        className="mt-5 w-full resize-y rounded-xl border border-border-strong p-4 text-foreground focus:border-accent focus:outline-none"
-      />
+      {/* Texto de la transcripción: Leer (documento con hablantes) o Editar (el textarea de siempre). */}
+      <div
+        className="mt-5 inline-flex rounded-lg border border-border-strong p-0.5"
+        role="group"
+        aria-label="Ver el texto para leerlo o editarlo"
+      >
+        <button
+          type="button"
+          onClick={() => setViewMode("read")}
+          aria-pressed={viewMode === "read"}
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+            viewMode === "read"
+              ? "bg-brand-600 text-white"
+              : "text-secondary hover:bg-surface-secondary"
+          }`}
+        >
+          <Icon name="read" size={15} className="shrink-0" />
+          Leer
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("edit")}
+          aria-pressed={viewMode === "edit"}
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+            viewMode === "edit"
+              ? "bg-brand-600 text-white"
+              : "text-secondary hover:bg-surface-secondary"
+          }`}
+        >
+          <Icon name="edit" size={15} className="shrink-0" />
+          Editar
+        </button>
+      </div>
+
+      {viewMode === "edit" ? (
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={14}
+          aria-label="Texto de la transcripción"
+          className="mt-3 w-full resize-y rounded-xl border border-border-strong p-4 text-foreground focus:border-accent focus:outline-none"
+        />
+      ) : (
+        <div className="mt-3 rounded-xl border border-border bg-surface p-6 sm:p-8">
+          <TranscriptReader text={text} />
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button onClick={save} disabled={!dirty} loading={saving} variant={justSaved ? "success" : "primary"}>

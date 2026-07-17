@@ -90,6 +90,7 @@ const ICONS = {
   download: Download,
   search: Search,
   edit: Pencil,
+  read: BookOpen,
   duplicate: Copy,
   delete: Trash2,
   close: X,
