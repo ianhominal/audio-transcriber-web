@@ -141,7 +141,11 @@ export function MenuItem({
         onClick();
       }}
       className={`block w-full rounded-md px-3 py-1.5 text-left transition hover:bg-surface-secondary ${
-        danger ? "text-red-600 hover:bg-red-50" : "text-secondary"
+        // `dark:` obligatorio: ver el comentario de `danger-outline` en Button.tsx. Este es el
+        // "Eliminar" de los menús "…" de cada fila.
+        danger
+          ? "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-400/10"
+          : "text-secondary"
       }`}
     >
       {children}

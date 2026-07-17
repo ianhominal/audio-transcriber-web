@@ -9,7 +9,12 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary: "border border-border-strong bg-surface font-medium text-secondary hover:bg-background disabled:opacity-50",
   ghost: "font-medium text-secondary hover:bg-surface-secondary disabled:opacity-50",
   danger: "bg-red-600 font-semibold text-white hover:bg-red-700 disabled:bg-border-strong disabled:text-tertiary",
-  "danger-outline": "border border-red-200 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50",
+  // `dark:` obligatorio: sin él, red-600 sobre la superficie oscura da ~3:1 y no llega a AA. Es el
+  // botón "Borrar" de cada nota, proyecto y carpeta. Mismo patrón que ya usan los 8 call sites
+  // sueltos de la app (text-red-600 dark:text-red-400) — irónicamente, el primitivo COMPARTIDO era
+  // el que no lo tenía.
+  "danger-outline":
+    "border border-red-200 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-400/30 dark:text-red-400 dark:hover:bg-red-400/10",
   success: "bg-emerald-600 font-semibold text-white hover:bg-emerald-600 disabled:bg-border-strong disabled:text-tertiary",
 };
 

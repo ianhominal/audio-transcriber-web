@@ -103,7 +103,7 @@ export function WriteNoteForm({
         />
 
         {error && (
-          <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-red-600">
+          <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
             <Icon name="warning" className="mt-0.5 shrink-0" />
             {error}
           </p>
