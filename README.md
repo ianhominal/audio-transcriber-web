@@ -24,7 +24,10 @@ Spanish and dozens of languages, with a clean and fast experience.
 - ⚡ **Instant** — transcriptions in seconds, not minutes, thanks to Groq's Whisper inference.
 - 🌎 **Any language** — Spanish, English and dozens more, with automatic detection.
 - 🎧 **Any format** — mp3, wav, ogg/opus (WhatsApp voice notes!), m4a, mp4 and more.
-- 👤 **Your library** — sign in and every transcription is saved, ready when you need it.
+- 🗂️ **Organized** — group notes into projects and search across everything you've said.
+- 🤖 **More than text** — AI summaries, reusable formats ("draft me the meeting minutes"), and a chat over any transcription.
+- 👥 **Who said what** — meetings are rendered speaker-by-speaker in a clean reading view.
+- 🖥️ **Web + desktop** — a companion desktop app syncs two-way over the same account.
 - ✍️ **Editable** — tweak the text, then copy it or download it as `.txt`.
 
 ## 🛠️ Built with
@@ -41,10 +44,12 @@ Spanish and dozens of languages, with a clean and fast experience.
 
 Small app, real-world architecture:
 
-- **Server-side API proxy** — third-party calls run on the backend, keeping the client clean.
+- **Hybrid product** — a desktop companion ([`transcriber-desktop`](https://github.com/ianhominal/transcriber-desktop), WPF/.NET) syncs two-way with this web app over the same Supabase backend, with a three-way merge and conflict resolution.
+- **Server-side API proxy** — third-party calls (Groq, AI features) run on the backend, keeping keys off the client.
 - **Row-Level Security** — every user can only ever read their own data, enforced at the database.
-- **Type-safe end to end** — TypeScript across UI, server routes and data access.
-- **Auth done right** — email/password and Google OAuth via Supabase, with protected routes middleware.
+- **Direct-to-storage uploads** — large audio is uploaded straight to Storage via signed URLs, bypassing the serverless body limit.
+- **Type-safe end to end** — TypeScript across UI, server routes and data access, with a pure-logic core covered by tests.
+- **Auth done right** — email/password and Google OAuth (PKCE) via Supabase, with protected-routes middleware.
 
 ## 🚀 Run it locally
 
