@@ -15,6 +15,47 @@ export function buildAudioObjectPath(userId: string, objectId: string, ext: stri
 }
 
 /**
+ * Extensiones de audio conocidas aceptadas por `/api/audio/prepare` (subida directa a Storage
+ * desde el desktop, salteando el body de la función de Vercel — tope duro ~4,5 MB).
+ */
+export const ALLOWED_AUDIO_EXTENSIONS = ["ogg", "opus", "wav", "mp3", "m4a", "webm", "aac"] as const;
+
+/**
+ * true si `ext` tiene el formato ".xxx" (un punto seguido de letras/números) Y está en la
+ * allowlist de extensiones de audio conocidas. Usado por `/api/audio/prepare` para no generar
+ * signed upload URLs con extensiones arbitrarias — nunca lanza, cualquier valor no-string cae
+ * en `false` (mismo criterio que `resolveGroqModel`/`sanitizeTerm`).
+ */
+export function isAllowedAudioExtension(ext: unknown): ext is string {
+  if (typeof ext !== "string" || !/^\.[a-zA-Z0-9]+$/.test(ext)) return false;
+  return (ALLOWED_AUDIO_EXTENSIONS as readonly string[]).includes(ext.slice(1).toLowerCase());
+}
+
+/**
+ * Normaliza y valida el `audioName` (nombre de display) del flujo de subida directa a Storage —
+ * usado tanto por `/api/audio/prepare` (validación temprana, antes de generar el signed URL)
+ * como por `/api/transcribe` en modo `storagePath` (el blob en Storage tiene un nombre random —
+ * UUID —, así que este es el nombre REAL que se guarda en `audio_name`). `null` si no es un
+ * string o queda vacío después del trim — nunca lanza, mismo criterio que `sanitizeTerm`
+ * (`src/lib/vocabulary/validate.ts`).
+ */
+export function sanitizeAudioName(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  return trimmed || null;
+}
+
+/**
+ * true si `storagePath` pertenece a `userId` — el primer segmento del path DEBE ser el userId
+ * (ver `buildAudioObjectPath`). Usado por `/api/transcribe` (modo `storagePath`, audio subido
+ * directo a Storage por el desktop) ANTES de bajar el blob: sin este chequeo, un usuario podría
+ * mandar el `storagePath` de otro y el server le devolvería su audio.
+ */
+export function isOwnedStoragePath(storagePath: unknown, userId: string): storagePath is string {
+  return typeof storagePath === "string" && storagePath.length > 0 && storagePath.startsWith(`${userId}/`);
+}
+
+/**
  * Backoff entre reintentos de subida a Storage, en ms: 300ms tras el 1er intento fallido,
  * 800ms tras el 2do. Junto con el intento original da 3 intentos totales.
  */

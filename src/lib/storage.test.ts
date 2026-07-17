@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { audioExtension, buildAudioObjectPath, uploadWithRetry, UPLOAD_MAX_ATTEMPTS } from "./storage";
+import {
+  audioExtension,
+  buildAudioObjectPath,
+  uploadWithRetry,
+  UPLOAD_MAX_ATTEMPTS,
+  isAllowedAudioExtension,
+  isOwnedStoragePath,
+  sanitizeAudioName,
+} from "./storage";
 
 // `sleep` fake que no espera de verdad — solo registra los delays pedidos, para que los tests
 // corran instantáneo sin depender de los tiempos reales de backoff.
@@ -32,6 +40,82 @@ describe("buildAudioObjectPath", () => {
 
   it("funciona sin extensión", () => {
     expect(buildAudioObjectPath("user-1", "obj-9", "")).toBe("user-1/obj-9");
+  });
+});
+
+describe("isAllowedAudioExtension", () => {
+  it("acepta extensiones conocidas con el punto", () => {
+    expect(isAllowedAudioExtension(".ogg")).toBe(true);
+    expect(isAllowedAudioExtension(".opus")).toBe(true);
+    expect(isAllowedAudioExtension(".wav")).toBe(true);
+    expect(isAllowedAudioExtension(".mp3")).toBe(true);
+    expect(isAllowedAudioExtension(".m4a")).toBe(true);
+    expect(isAllowedAudioExtension(".webm")).toBe(true);
+    expect(isAllowedAudioExtension(".aac")).toBe(true);
+  });
+
+  it("es case-insensitive", () => {
+    expect(isAllowedAudioExtension(".OGG")).toBe(true);
+    expect(isAllowedAudioExtension(".Mp3")).toBe(true);
+  });
+
+  it("rechaza extensiones desconocidas", () => {
+    expect(isAllowedAudioExtension(".exe")).toBe(false);
+    expect(isAllowedAudioExtension(".txt")).toBe(false);
+  });
+
+  it("rechaza formato inválido (sin punto, vacío, con path traversal)", () => {
+    expect(isAllowedAudioExtension("ogg")).toBe(false);
+    expect(isAllowedAudioExtension("")).toBe(false);
+    expect(isAllowedAudioExtension(".")).toBe(false);
+    expect(isAllowedAudioExtension("../ogg")).toBe(false);
+    expect(isAllowedAudioExtension(".og g")).toBe(false);
+  });
+
+  it("rechaza valores no-string sin lanzar", () => {
+    expect(isAllowedAudioExtension(undefined)).toBe(false);
+    expect(isAllowedAudioExtension(null)).toBe(false);
+    expect(isAllowedAudioExtension(123)).toBe(false);
+    expect(isAllowedAudioExtension({})).toBe(false);
+  });
+});
+
+describe("isOwnedStoragePath", () => {
+  it("acepta un path cuyo primer segmento es el userId", () => {
+    expect(isOwnedStoragePath("user-1/obj-9.ogg", "user-1")).toBe(true);
+  });
+
+  it("rechaza el path de otro usuario", () => {
+    expect(isOwnedStoragePath("user-2/obj-9.ogg", "user-1")).toBe(false);
+  });
+
+  it("rechaza un userId que es prefijo de otro (sin falso positivo por el separador)", () => {
+    expect(isOwnedStoragePath("user-12/obj-9.ogg", "user-1")).toBe(false);
+  });
+
+  it("rechaza valores no-string o vacíos sin lanzar", () => {
+    expect(isOwnedStoragePath(undefined, "user-1")).toBe(false);
+    expect(isOwnedStoragePath(null, "user-1")).toBe(false);
+    expect(isOwnedStoragePath("", "user-1")).toBe(false);
+    expect(isOwnedStoragePath("user-1/obj-9.ogg", "")).toBe(false);
+  });
+});
+
+describe("sanitizeAudioName", () => {
+  it("devuelve el nombre recortado si es un string no vacío", () => {
+    expect(sanitizeAudioName("reunion.ogg")).toBe("reunion.ogg");
+    expect(sanitizeAudioName("  reunion.ogg  ")).toBe("reunion.ogg");
+  });
+
+  it("devuelve null si queda vacío después del trim", () => {
+    expect(sanitizeAudioName("")).toBeNull();
+    expect(sanitizeAudioName("   ")).toBeNull();
+  });
+
+  it("devuelve null para valores no-string sin lanzar", () => {
+    expect(sanitizeAudioName(undefined)).toBeNull();
+    expect(sanitizeAudioName(null)).toBeNull();
+    expect(sanitizeAudioName(123)).toBeNull();
   });
 });
 

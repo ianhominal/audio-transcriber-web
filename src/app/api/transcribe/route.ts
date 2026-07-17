@@ -6,6 +6,8 @@ import {
   AUDIO_BUCKET,
   audioExtension,
   buildAudioObjectPath,
+  isOwnedStoragePath,
+  sanitizeAudioName,
   uploadWithRetry,
   UPLOAD_MAX_ATTEMPTS,
 } from "@/lib/storage";
@@ -47,44 +49,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let form: FormData;
-  try {
-    form = await req.formData();
-  } catch {
-    return NextResponse.json({ error: "No se pudo leer el archivo." }, { status: 400 });
-  }
-
-  const file = form.get("file");
-  const language = (form.get("language") as string) || "es";
-  // El modelo lo elige el cliente, pero SIEMPRE se valida contra una allowlist estricta
-  // antes de mandarlo a Groq (ver src/lib/transcribe/model.ts) — nunca se reenvía tal cual.
-  const model = resolveGroqModel(form.get("model"));
-  // Modo "Transcribir" vs "Transcribir y traducir" (Fase F4, ver ROADMAP.md item 6) + idioma
-  // destino — ambos validados contra allowlists estrictas (ver src/lib/translate/languages.ts),
-  // mismo criterio que `model`/`language` acá arriba.
-  const mode = resolveTranscribeMode(form.get("mode"));
-  const targetLanguage = resolveTranslationLanguage(form.get("targetLanguage"));
-
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "No se recibió ningún audio." }, { status: 400 });
-  }
-  if (file.size > 25 * 1024 * 1024) {
-    return NextResponse.json({ error: "El audio supera los 25 MB." }, { status: 413 });
-  }
-
-  const audioName = file.name || "audio";
-
-  // El título opcional que manda el cliente (ej. el que la usuaria editó/dejó en la cola de
-  // TranscribeWorkspace) se lee ACÁ arriba — antes vivía junto al insert (paso 4), pero el paso 2.7
-  // (auto-título) más abajo necesita decidir si este título es "mecánico" (nombre de archivo/
-  // grabación por defecto, ver `isPlaceholderTitle`) ANTES de armar la fila a insertar. Columna
-  // `title` es NOT NULL DEFAULT '' (ver migración transcription_title): si no viene título,
-  // guardamos "" (no null) — la UI ya usa `audio_name` como fallback visual cuando `title` está
-  // vacío (ver placeholder en TranscriptionDetail).
-  const titleRaw = (form.get("title") as string) || "";
-  const title = titleRaw.trim().slice(0, 120);
-
-  // 1.4) Límite diario de transcripciones por usuario.
+  // 1.4) Límite diario de transcripciones por usuario. Se chequea ACÁ, antes de leer/bajar el
+  //      audio (sea del body o de Storage): en modo `storagePath` el audio puede pesar hasta 50
+  //      MB (ver migración `20260717120000_audio_bucket_size_limit.sql`) — bajarlo de Storage
+  //      ANTES de saber si el usuario todavía tiene cuota le hace pagar el egress completo a cada
+  //      request rechazado por límite. Chequear acá (solo necesita `user.id`) evita ese costo en
+  //      los dos modos sin cambiar nada más del contrato.
+  //
   //      Se cuentan también las transcripciones soft-deleted: el usuario ya consumió cuota
   //      real de Groq al crearlas, sin importar si luego las movió a la papelera.
   //
@@ -122,6 +93,95 @@ export async function POST(req: NextRequest) {
       { status: 429 }
     );
   }
+
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return NextResponse.json({ error: "No se pudo leer el archivo." }, { status: 400 });
+  }
+
+  const language = (form.get("language") as string) || "es";
+  // El modelo lo elige el cliente, pero SIEMPRE se valida contra una allowlist estricta
+  // antes de mandarlo a Groq (ver src/lib/transcribe/model.ts) — nunca se reenvía tal cual.
+  const model = resolveGroqModel(form.get("model"));
+  // Modo "Transcribir" vs "Transcribir y traducir" (Fase F4, ver ROADMAP.md item 6) + idioma
+  // destino — ambos validados contra allowlists estrictas (ver src/lib/translate/languages.ts),
+  // mismo criterio que `model`/`language` acá arriba.
+  const mode = resolveTranscribeMode(form.get("mode"));
+  const targetLanguage = resolveTranslationLanguage(form.get("targetLanguage"));
+
+  // 0) Origen del audio: en el body (`file`, grabaciones de la web) o YA en Storage
+  //    (`storagePath`, subido por el desktop con un signed upload URL de /api/audio/prepare —
+  //    salteando el tope duro de ~4,5 MB del body de la función de Vercel, para audios
+  //    comprimidos de reuniones largas). `storagePath` no vacío activa el modo Storage; el modo
+  //    `file` de siempre queda intacto como branch alternativo, no reemplazado.
+  const storagePathField = form.get("storagePath");
+  const hasStoragePath = typeof storagePathField === "string" && storagePathField.length > 0;
+
+  let file: File;
+  let audioName: string;
+  // No-null SOLO en modo Storage: marca que el audio YA está en Storage, así los pasos 2.1
+  // (rescate) y 3 (subida normal) más abajo saben que no tienen que volver a subirlo.
+  let storagePath: string | null = null;
+
+  if (hasStoragePath) {
+    // Seguridad CRÍTICA: el primer segmento del path ES el userId (ver `buildAudioObjectPath`) —
+    // sin este chequeo, un usuario podría mandar el `storagePath` de otro y bajarse su audio.
+    if (!isOwnedStoragePath(storagePathField, user.id)) {
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
+    storagePath = storagePathField;
+
+    // El blob en Storage tiene un nombre random (UUID, ver `buildAudioObjectPath`) — sin
+    // `audioName` no hay forma de saber el nombre de display real, así que acá es OBLIGATORIO
+    // (a diferencia del modo `file`, donde cae al nombre del archivo subido).
+    const resolvedAudioName = sanitizeAudioName(form.get("audioName"));
+    if (!resolvedAudioName) {
+      return NextResponse.json({ error: "Cuerpo inválido." }, { status: 400 });
+    }
+    audioName = resolvedAudioName;
+
+    const { data: blob, error: downloadErr } = await supabase.storage.from(AUDIO_BUCKET).download(storagePath);
+    if (downloadErr || !blob) {
+      console.error("[transcribe] storage download failed", {
+        userId: user.id,
+        storagePath,
+        error: downloadErr?.message,
+      });
+      const notFound = /not.?found|404/i.test(downloadErr?.message ?? "");
+      return NextResponse.json(
+        { error: "No se pudo leer el audio subido. Probá de nuevo." },
+        { status: notFound ? 404 : 500 }
+      );
+    }
+    // Reconstruye un `File` con el nombre/tipo originales para reusar TODO el flujo de acá abajo
+    // (Groq, dedupe, título/tags, traducción) sin importar de dónde vino el audio.
+    file = new File([blob], audioName, { type: blob.type || "application/octet-stream" });
+  } else {
+    const fileField = form.get("file");
+    if (!(fileField instanceof File)) {
+      return NextResponse.json({ error: "No se recibió ningún audio." }, { status: 400 });
+    }
+    file = fileField;
+    audioName = file.name || "audio";
+  }
+
+  // Groq no acepta más de 25 MB — sigue aplicando acá tal cual al blob YA bajado en modo
+  // Storage (un opus de reunión larga entra holgado, pero el guard se mantiene igual).
+  if (file.size > 25 * 1024 * 1024) {
+    return NextResponse.json({ error: "El audio supera los 25 MB." }, { status: 413 });
+  }
+
+  // El título opcional que manda el cliente (ej. el que la usuaria editó/dejó en la cola de
+  // TranscribeWorkspace) se lee ACÁ arriba — antes vivía junto al insert (paso 4), pero el paso 2.7
+  // (auto-título) más abajo necesita decidir si este título es "mecánico" (nombre de archivo/
+  // grabación por defecto, ver `isPlaceholderTitle`) ANTES de armar la fila a insertar. Columna
+  // `title` es NOT NULL DEFAULT '' (ver migración transcription_title): si no viene título,
+  // guardamos "" (no null) — la UI ya usa `audio_name` como fallback visual cuando `title` está
+  // vacío (ver placeholder en TranscriptionDetail).
+  const titleRaw = (form.get("title") as string) || "";
+  const title = titleRaw.trim().slice(0, 120);
 
   // 1.5) Dedupe: si ya existe una transcripción con el mismo nombre y tamaño para este
   //      usuario, no volvemos a llamar a Groq ni a duplicar. Devolvemos la existente.
@@ -203,23 +263,27 @@ export async function POST(req: NextRequest) {
    * (`tags`, `translated_to`, …), solo las base, que existen en todos los entornos.
    */
   const rescueAudioOnly = async (): Promise<{ id: string | null; audioStored: boolean }> => {
-    let rescuedPath: string | null = null;
-    try {
-      const ext = audioExtension(audioName);
-      const candidatePath = buildAudioObjectPath(user.id, randomUUID(), ext);
-      const { error: upErr } = await uploadWithRetry(() =>
-        supabase.storage.from(AUDIO_BUCKET).upload(candidatePath, file, {
-          contentType: file.type || "application/octet-stream",
-          upsert: false,
-        })
-      );
-      if (upErr) {
-        console.error("[transcribe] rescue upload failed", { userId: user.id, error: upErr.message });
-      } else {
-        rescuedPath = candidatePath;
+    // Modo Storage: el audio YA está en Storage (ver paso 0 más arriba) — no se re-sube acá
+    // tampoco, se reusa directo el path ya validado como propio del usuario.
+    let rescuedPath: string | null = storagePath;
+    if (!rescuedPath) {
+      try {
+        const ext = audioExtension(audioName);
+        const candidatePath = buildAudioObjectPath(user.id, randomUUID(), ext);
+        const { error: upErr } = await uploadWithRetry(() =>
+          supabase.storage.from(AUDIO_BUCKET).upload(candidatePath, file, {
+            contentType: file.type || "application/octet-stream",
+            upsert: false,
+          })
+        );
+        if (upErr) {
+          console.error("[transcribe] rescue upload failed", { userId: user.id, error: upErr.message });
+        } else {
+          rescuedPath = candidatePath;
+        }
+      } catch (err) {
+        console.error("[transcribe] rescue upload threw", err, { userId: user.id });
       }
-    } catch (err) {
-      console.error("[transcribe] rescue upload threw", err, { userId: user.id });
     }
 
     try {
@@ -554,8 +618,14 @@ export async function POST(req: NextRequest) {
     })(),
 
     // 3) Subir el audio a Storage (bucket privado, carpeta del usuario). Best-effort:
-    //    si falla la subida, igual guardamos el texto (sin audio).
+    //    si falla la subida, igual guardamos el texto (sin audio). Modo Storage: el audio YA
+    //    está ahí (subido por signed URL antes de este request, ver paso 0 y
+    //    /api/audio/prepare) — no se re-sube, solo se reusa el `storagePath` ya validado.
     (async () => {
+      if (storagePath) {
+        audioPath = storagePath;
+        return;
+      }
       try {
         const ext = audioExtension(audioName);
         const path = buildAudioObjectPath(user.id, randomUUID(), ext);
