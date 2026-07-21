@@ -207,3 +207,54 @@ describe("POST /api/sync/push — borrado de proyectos", () => {
     expect(json.projectDeletions).toEqual([{ id: "leaf2", deletedProjects: 1, deletedTranscriptions: 1 }]);
   });
 });
+
+describe("POST /api/sync/push — upsert de transcripciones", () => {
+  it("con audio_name: upsert REAL (crea-o-actualiza), con user_id y audio_name en la fila", async () => {
+    // Bug de pérdida silenciosa: antes esto era un UPDATE que, para una transcripción 100% local
+    // (nunca creada por Groq), no tocaba ninguna fila y respondía ok sin persistir nada.
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "transcriptions" && state.mode === "upsert") return { data: null, error: null };
+      throw new Error(`Query inesperada: ${state.table}/${state.mode}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush({
+      transcriptions: { upserts: [{ id: "t1", audio_name: "Reunion.wav", text: "Persona 1: hola", project_id: "p1" }] },
+    });
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(json.errors).toEqual([]);
+    const upsertCall = calls.find((c) => c.table === "transcriptions" && c.mode === "upsert");
+    expect(upsertCall).toBeDefined();
+    expect(upsertCall!.updatePayload).toMatchObject({
+      id: "t1",
+      user_id: "u1",
+      audio_name: "Reunion.wav",
+      text: "Persona 1: hola",
+      project_id: "p1",
+      deleted_at: null,
+    });
+    // NUNCA debe caer al update-only (que no crearía la fila 100% local).
+    expect(calls.some((c) => c.table === "transcriptions" && c.mode === "update")).toBe(false);
+  });
+
+  it("sin audio_name (cliente viejo): update-only scopeado por user, no intenta crear", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "transcriptions" && state.mode === "update") return { data: null, error: null };
+      throw new Error(`Query inesperada: ${state.table}/${state.mode}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush({ transcriptions: { upserts: [{ id: "t1", text: "editado" }] } });
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    const updateCall = calls.find((c) => c.table === "transcriptions" && c.mode === "update");
+    expect(updateCall).toBeDefined();
+    expect(updateCall!.filters.eq).toMatchObject({ id: "t1", user_id: "u1" });
+    expect(calls.some((c) => c.mode === "upsert")).toBe(false);
+  });
+});

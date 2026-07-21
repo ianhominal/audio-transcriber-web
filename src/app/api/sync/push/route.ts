@@ -303,27 +303,46 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ---- Transcripciones: upserts (solo metadata/texto, no creación) ----
+    // ---- Transcripciones: upserts (crea-o-actualiza) ----
+    // Antes era update-only y asumía que la fila SIEMPRE la creaba /api/transcribe (Groq
+    // server-side). Con el desktop transcribiendo 100% LOCAL (motor Local + diarización), la fila
+    // nunca existe en el server, así que el UPDATE no tocaba ninguna fila, Supabase no devolvía
+    // error, y la transcripción se PERDÍA en silencio (el endpoint respondía ok). Ahora, si el
+    // cliente manda `audio_name` (el NOT NULL que el INSERT necesita), se hace un upsert real
+    // crea-o-actualiza. Sin `audio_name` (clientes viejos que no lo mandan) se mantiene el
+    // update-only de antes, para no romperlos.
     for (const t of body.transcriptions?.upserts ?? []) {
       try {
         if (!t.id) {
           errors.push("Transcripción sin id");
           continue;
         }
-        const update: Record<string, unknown> = {};
-        if (t.title !== undefined) update.title = (t.title ?? "").slice(0, 120);
-        if (t.text !== undefined) update.text = t.text;
-        if (t.description !== undefined) update.description = (t.description ?? "").slice(0, 2000);
-        if (t.icon !== undefined) update.icon = (t.icon ?? "").slice(0, 8);
-        if (t.project_id !== undefined) update.project_id = t.project_id;
-        if (Object.keys(update).length === 0) continue;
+        const fields: Record<string, unknown> = {};
+        if (t.title !== undefined) fields.title = (t.title ?? "").slice(0, 120);
+        if (t.text !== undefined) fields.text = t.text;
+        if (t.description !== undefined) fields.description = (t.description ?? "").slice(0, 2000);
+        if (t.icon !== undefined) fields.icon = (t.icon ?? "").slice(0, 8);
+        if (t.project_id !== undefined) fields.project_id = t.project_id;
 
-        const { error } = await supabase
-          .from("transcriptions")
-          .update(update)
-          .eq("id", t.id)
-          .eq("user_id", user.id);
-        if (error) errors.push(`Transcripción ${t.id}: ${error.message}`);
+        if (t.audio_name) {
+          // Upsert real: crea la fila si no existe (transcripción 100% local) o la actualiza si ya
+          // existe. `user_id` + `audio_name` son los NOT NULL que el INSERT necesita; RLS (cliente
+          // user-scoped de getApiUser, igual que el upsert de proyectos) garantiza que solo se
+          // pueda crear/actualizar filas propias. `deleted_at: null` resucita una fila que se
+          // vuelve a pushear con el mismo id (el desktop la tiene → debe estar visible).
+          const row = { id: t.id, user_id: user.id, audio_name: t.audio_name, deleted_at: null, ...fields };
+          const { error } = await supabase.from("transcriptions").upsert(row);
+          if (error) errors.push(`Transcripción ${t.id}: ${error.message}`);
+        } else {
+          // Cliente viejo (sin audio_name): update-only, no puede crear. Comportamiento previo.
+          if (Object.keys(fields).length === 0) continue;
+          const { error } = await supabase
+            .from("transcriptions")
+            .update(fields)
+            .eq("id", t.id)
+            .eq("user_id", user.id);
+          if (error) errors.push(`Transcripción ${t.id}: ${error.message}`);
+        }
       } catch (err) {
         errors.push(`Transcripción ${t.id ?? "(sin id)"}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -377,6 +396,9 @@ type PushBody = {
   transcriptions?: {
     upserts?: {
       id: string;
+      /** NOT NULL en la tabla: requerido para poder CREAR una transcripción 100% local (upsert
+       *  real). Si falta, el endpoint cae al update-only de siempre (clientes viejos). */
+      audio_name?: string;
       title?: string;
       text?: string;
       description?: string;
