@@ -12,8 +12,12 @@ import { useToast } from "@/components/ui/Toast";
 import { isValidChatMessageText, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/config";
 import { parseChatErrorMessage } from "@/lib/chat/errors";
 import { getMessageText, shouldRenderMarkdown } from "@/lib/chat/message";
+import { buildProjectQuickActionMessage } from "@/lib/chat/projectActions";
 import { resolveChatRequestConfig, type ChatScope } from "@/lib/chat/scope";
 import { isValidBrainQuestionText, MAX_BRAIN_QUESTION_CHARS } from "@/lib/brain/config";
+import { MIN_MERGE_NOTES } from "@/lib/merge/validate";
+import { useMergeStream } from "@/lib/merge/useMergeStream";
+import { MergeResult } from "@/components/app/merge-result";
 
 /** Estado de "Guardar como nota" (quick win del brainstorm "Sacar el output afuera", ver
  * ROADMAP.md) por mensaje — un `Record` keyeado por `message.id` en vez de un booleano único
@@ -96,6 +100,7 @@ export function ChatPanel({
   defaultScope = transcriptionId ? "note" : "all",
   projectId,
   projectName,
+  mergeCandidates,
 }: {
   transcriptionId?: string;
   initialMessages?: UIMessage[];
@@ -109,6 +114,13 @@ export function ChatPanel({
    * resuelve el nombre por su cuenta para el system prompt (ver `/api/brain/route.ts`), esto NUNCA
    * viaja al servidor. */
   projectName?: string;
+  /** Notas candidatas para "Combinar en documento" (feature 2026-07-22 fase 2 — absorbe "Unir
+   * notas" como acción del asistente en vez de un botón aparte). Mismo criterio que `/app/merge`
+   * (ver `fetchMergeCandidates`, `src/lib/merge/queries.ts`): hasta `MAX_MERGE_NOTES` notas directas
+   * del proyecto, más viejas primero. Sin esto (o con menos de `MIN_MERGE_NOTES` notas), la acción no
+   * aparece — mismo criterio que el botón standalone que reemplaza (antes gateado por
+   * `items.length >= MIN_MERGE_NOTES` en `page.tsx`). */
+  mergeCandidates?: { notes: { id: string; title: string; createdAt: string }[]; totalNotesInProject: number };
 }) {
   const { show: toast } = useToast();
   const [input, setInput] = useState("");
@@ -210,6 +222,29 @@ export function ChatPanel({
     }
   }
 
+  // "Combinar en documento" (ex "Unir notas", feature 2026-07-22 fase 2): absorbe el botón standalone
+  // "Unir en un documento" como una ACCIÓN del asistente scopeado a proyecto, en vez de una feature
+  // aparte con su propia página como entry point primario (`/app/merge` sigue existiendo como
+  // deep-link). NO usa `useChat`/`sendMessage` — es un protocolo de streaming distinto (texto plano +
+  // headers, ver `useMergeStream`), nunca se mezcla con el chat UIMessage/SSE de arriba. `canMerge`
+  // replica el gate que antes vivía en `page.tsx` (`items.length >= MIN_MERGE_NOTES`) para decidir si
+  // el botón standalone se mostraba.
+  const merge = useMergeStream(toast);
+  const canMerge = effectiveScope === "project" && (mergeCandidates?.notes.length ?? 0) >= MIN_MERGE_NOTES;
+
+  /** Dispara "Combinar en documento": si hay texto sin enviar en el input del chat lo usa como
+   * `instruction`, si no manda sin instrucción (mismo criterio que `merge-view.tsx`, ahí la
+   * instrucción vive en su propio textarea; acá se reusa el input del chat en vez de duplicar el
+   * campo). Limpia el input después, mismo criterio que `submit()`. */
+  function handleCombineIntoDocument() {
+    if (!mergeCandidates || merge.merging) return;
+    merge.mergeNotes(
+      mergeCandidates.notes.map((n) => n.id),
+      input
+    );
+    setInput("");
+  }
+
   function submit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || inputDisabled) return;
@@ -266,6 +301,58 @@ export function ChatPanel({
           <Icon name="warning" className="shrink-0" />
           {disabledReason}
         </p>
+      )}
+
+      {/* Acciones rápidas del scope "project" (feature 2026-07-22 fase 2): "Resumir"/"Próximos
+          pasos" son preguntas preset que van por el MISMO flujo de chat de abajo (`submit`,
+          `sendMessage`); "Combinar en documento" es la acción que reemplaza al botón standalone
+          "Unir en un documento" — produce un DOCUMENTO, no un turno de chat, ver `handleCombineIntoDocument`. */}
+      {effectiveScope === "project" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={inputDisabled}
+            onClick={() => submit(buildProjectQuickActionMessage("summarize"))}
+          >
+            Resumir
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={inputDisabled}
+            onClick={() => submit(buildProjectQuickActionMessage("next-steps"))}
+          >
+            Próximos pasos
+          </Button>
+          {canMerge && (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={merge.merging}
+              disabled={merge.merging}
+              onClick={handleCombineIntoDocument}
+            >
+              <Icon name="merge" /> Combinar en documento
+            </Button>
+          )}
+        </div>
+      )}
+
+      {canMerge && (merge.merging || merge.output) && (
+        <div className="mt-3 rounded-lg border border-border-strong bg-background p-3">
+          <MergeResult
+            merging={merge.merging}
+            output={merge.output}
+            done={merge.done}
+            truncated={merge.truncated}
+            includedCount={merge.includedCount}
+            totalConsideredNotes={mergeCandidates?.notes.length ?? 0}
+            savingNote={merge.savingNote}
+            noteSavedId={merge.noteSavedId}
+            onSave={merge.saveAsNote}
+          />
+        </div>
       )}
 
       {/* Región viva: cada mensaje nuevo (de la usuaria o de la IA) se anuncia a un lector de

@@ -1,25 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { CopyButton } from "@/components/ui/CopyButton";
-import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useToast } from "@/components/ui/Toast";
 import { formatDate } from "@/lib/format";
 import { MAX_MERGE_INSTRUCTION_LENGTH } from "@/lib/merge/validate";
+import { useMergeStream } from "@/lib/merge/useMergeStream";
+import { MergeResult } from "@/components/app/merge-result";
 
 type MergeNote = { id: string; title: string; createdAt: string };
 
 /**
  * "Merge several notes into one document" (feature 2026-07-13, see brief) — per-project view (not
- * multi-select, see header comment in `src/lib/merge/validate.ts`). EXACTLY replicates the manual
- * streaming + actions pattern already used by "Apply format" in
- * `src/app/app/t/[id]/transcription-detail.tsx` (`applyRecipe`/`saveApplyOutputAsNote`): fetch with
- * `res.body.getReader()` + `TextDecoder`, without inventing a new pattern. The
- * `X-Merge-Truncated`/`X-Merge-Included-Count` headers (see `/api/notes/merge`) are read off the
- * `Response` BEFORE consuming the body — the plain-text stream carries no embedded marker.
+ * multi-select, see header comment in `src/lib/merge/validate.ts`). The streaming + "save as note"
+ * logic lives in `useMergeStream` (`src/lib/merge/useMergeStream.ts`), extracted 2026-07-22 (fase 2)
+ * so the "Combinar en documento" action embedded in the assistant (`ChatPanel`) can reuse it without
+ * duplicating the manual `res.body.getReader()` + header-reading pattern. The result region (document
+ * + copy/save actions + truncation notice) lives in `MergeResult`
+ * (`src/components/app/merge-result.tsx`), same reuse reason. This component keeps ONLY what's
+ * specific to the per-project page: the note list card and the instruction textarea/button.
  */
 export function MergeView({
   projectId,
@@ -36,94 +35,11 @@ export function MergeView({
    * newer notes were left out, since the notes list itself only ever contains the oldest ones. */
   totalNotesInProject: number;
 }) {
-  const router = useRouter();
   const { show: toast } = useToast();
   const [instruction, setInstruction] = useState("");
-  const [merging, setMerging] = useState(false);
-  const [output, setOutput] = useState("");
-  const [done, setDone] = useState(false);
-  const [truncated, setTruncated] = useState(false);
-  const [includedCount, setIncludedCount] = useState<number | null>(null);
-  const [savingNote, setSavingNote] = useState(false);
-  const [noteSavedId, setNoteSavedId] = useState<string | null>(null);
+  const merge = useMergeStream(toast);
 
   const notesLeftOut = totalNotesInProject - notes.length;
-
-  async function mergeNotes() {
-    if (merging) return;
-    setMerging(true);
-    setOutput("");
-    setDone(false);
-    setTruncated(false);
-    setIncludedCount(null);
-    setNoteSavedId(null);
-    try {
-      const res = await fetch("/api/notes/merge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcriptionIds: notes.map((n) => n.id), instruction }),
-      });
-
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 429) {
-          toast(data.error ?? "Llegaste al límite diario de uniones. Probá de nuevo mañana.", "error");
-        } else if (res.status === 404) {
-          toast(data.error ?? "No pudimos encontrar alguna de las notas elegidas.", "error");
-        } else {
-          toast(data.error ?? "No se pudo unir las notas.", "error");
-        }
-        return;
-      }
-
-      // Read BEFORE consuming the body — same reason documented in the route: the plain-text stream
-      // carries no embedded marker to transmit this metadata.
-      setTruncated(res.headers.get("X-Merge-Truncated") === "true");
-      const includedHeader = res.headers.get("X-Merge-Included-Count");
-      setIncludedCount(includedHeader ? Number(includedHeader) : null);
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = "";
-      while (true) {
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        acc += decoder.decode(value, { stream: true });
-        setOutput(acc);
-      }
-      setDone(true);
-    } catch {
-      toast("No se pudo contactar al servidor.", "error");
-    } finally {
-      setMerging(false);
-    }
-  }
-
-  /** "Save as note" for the merged document — same endpoint/shape used by the rest of the app
-   * (`POST /api/notes`, see `saveApplyOutputAsNote` in `transcription-detail.tsx`). */
-  async function saveAsNote() {
-    if (!output.trim() || savingNote) return;
-    setSavingNote(true);
-    try {
-      const res = await fetch("/api/notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: output }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast(data.error ?? "No se pudo guardar la nota.", "error");
-        return;
-      }
-      setNoteSavedId(data.id);
-      toast("Guardado ✓", "success");
-      router.push(`/app/t/${data.id}`);
-    } catch {
-      toast("No se pudo contactar al servidor.", "error");
-    } finally {
-      setSavingNote(false);
-    }
-  }
 
   return (
     <div className="mt-3" data-project-id={projectId}>
@@ -163,47 +79,27 @@ export function MergeView({
           className="mt-2 w-full resize-y rounded-lg border border-border-strong p-3 text-sm text-secondary focus:border-accent focus:outline-none"
         />
         <div className="mt-3">
-          <Button variant="primary" loading={merging} disabled={merging} onClick={mergeNotes}>
-            {merging ? "Generando…" : "Unir en un documento"}
+          <Button
+            variant="primary"
+            loading={merge.merging}
+            disabled={merge.merging}
+            onClick={() => merge.mergeNotes(notes.map((n) => n.id), instruction)}
+          >
+            {merge.merging ? "Generando…" : "Unir en un documento"}
           </Button>
         </div>
 
-        {/* Live region: same criteria as "Resumen con IA"/"Aplicar formato" in
-            `transcription-detail.tsx` — announces when generation starts and when the result
-            appears, without the user having to go look for it. */}
-        <div role="status" aria-live="polite">
-          {merging && !output && <p className="mt-3 text-xs text-tertiary">Generando…</p>}
-          {output && (
-            <div className="mt-4 space-y-3">
-              {done && truncated && includedCount !== null && (
-                <p className="text-xs text-tertiary">
-                  Nota: el texto combinado era muy largo, así que unimos las primeras {includedCount} de{" "}
-                  {notes.length} notas.
-                </p>
-              )}
-              <MarkdownContent text={output} className="text-sm text-secondary" />
-              {done && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <CopyButton text={output} label="Copiar" ariaLabel="Copiar documento unido" />
-                  {noteSavedId ? (
-                    <Link href={`/app/t/${noteSavedId}`} className="text-xs font-semibold text-accent hover:underline">
-                      Guardado ✓ · Ver nota
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={saveAsNote}
-                      disabled={savingNote}
-                      className="text-xs font-medium text-tertiary transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {savingNote ? "Guardando…" : "Guardar como nota"}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <MergeResult
+          merging={merge.merging}
+          output={merge.output}
+          done={merge.done}
+          truncated={merge.truncated}
+          includedCount={merge.includedCount}
+          totalConsideredNotes={notes.length}
+          savingNote={merge.savingNote}
+          noteSavedId={merge.noteSavedId}
+          onSave={merge.saveAsNote}
+        />
       </div>
     </div>
   );

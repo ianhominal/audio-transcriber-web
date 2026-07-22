@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Icon } from "@/components/ui/icon";
 import { buildProjectBreadcrumb, buildProjectTree, getSubfolders, rollUpProjectCounts } from "@/lib/drive/tree";
 import { MIN_MERGE_NOTES } from "@/lib/merge/validate";
+import { fetchMergeCandidates } from "@/lib/merge/queries";
 import {
   getProjectColorCompatSnapshot,
   getSchemaCompatSnapshot,
@@ -232,11 +233,23 @@ export default async function Dashboard({
   // más abajo) para poder saltear la query por completo fuera de esta vista.
   const isTopView = (!filter || filter === "none") && !tagFilter;
 
-  const [projects, { data: countRows }, items, resurfaceCandidates] = await Promise.all([
+  const [
+    projects,
+    { data: countRows },
+    items,
+    resurfaceCandidates,
+    {
+      data: { user },
+    },
+  ] = await Promise.all([
     fetchProjectsCompat(supabase),
     supabase.from("transcriptions").select("project_id").is("deleted_at", null),
     fetchTranscriptionsCompat(supabase, filter, tagFilter),
     isTopView ? fetchResurfaceCandidates(supabase) : Promise.resolve([]),
+    // Solo se usa para `fetchMergeCandidates` más abajo (defense-in-depth `user_id`, mismo criterio
+    // que `/api/notes/merge`/`merge/page.tsx`) — se resuelve acá, en paralelo con el resto, para no
+    // agregar una espera secuencial extra a CADA carga del dashboard.
+    supabase.auth.getUser(),
   ]);
 
   // Conteos por proyecto + "sin proyecto" + total.
@@ -293,6 +306,15 @@ export default async function Dashboard({
   // más arriba): si no está aplicada, deshabilitamos "Nueva carpeta" con un mensaje claro en vez
   // de dejar que el usuario choque con el error al enviar el formulario.
   const subfoldersAvailable = getSchemaCompatSnapshot().available === true;
+
+  // Candidatas para "Combinar en documento" (feature 2026-07-22 fase 2: "Unir notas" pasó de botón
+  // standalone a ACCIÓN dentro del asistente, ver `ProjectChatButton`/`ChatPanel`) — mismo gate que
+  // tenía el botón viejo (`items.length >= MIN_MERGE_NOTES`), solo se resuelve cuando hace falta (hay
+  // un proyecto activo con notas suficientes), no en "Todas"/"Sin proyecto" ni en proyectos chicos.
+  const mergeCandidates =
+    activeProject && items.length >= MIN_MERGE_NOTES
+      ? await fetchMergeCandidates(supabase, activeProject.id, user?.id ?? "")
+      : undefined;
 
   return (
     <div className="mx-auto max-w-6xl gap-6 px-4 py-6 sm:px-6 sm:py-8 md:grid md:grid-cols-[16rem_1fr] md:items-start">
@@ -375,22 +397,19 @@ export default async function Dashboard({
                 <Icon name="edit" /> Escribir nota
               </Link>
               <NewSubfolderButton parentId={activeProject.id} available={subfoldersAvailable} />
-              {/* "Merge several notes into one document" (feature 2026-07-13): only makes sense with
-                  at least 2 DIRECT notes in this project/folder — same per-project navigation
-                  criteria (`?project=<id>`) as the rest of the dashboard, see
-                  `src/lib/merge/validate.ts` (MIN_MERGE_NOTES). */}
-              {items.length >= MIN_MERGE_NOTES && (
-                <Link
-                  href={`/app/merge?project=${activeProject.id}`}
-                  className={buttonClasses({ variant: "secondary", size: "sm" })}
-                >
-                  <Icon name="merge" /> Unir en un documento
-                </Link>
-              )}
               {/* Chat con IA acotado a este proyecto ("Este proyecto" — feature 2026-07-22, ver
-                  `ChatPanel`/`src/lib/chat/scope.ts`): entry point desde la vista de proyecto,
-                  mismo criterio de navegación por `?project=<id>` que "Unir en un documento". */}
-              <ProjectChatButton projectId={activeProject.id} projectName={activeProject.name} />
+                  `ChatPanel`/`src/lib/chat/scope.ts`): entry point desde la vista de proyecto, mismo
+                  criterio de navegación por `?project=<id>` que el resto de esta fila. "Unir en un
+                  documento" (feature 2026-07-13) DEJÓ de ser un botón standalone acá — fase 2
+                  (2026-07-22) lo absorbió como la acción "Combinar en documento" DENTRO del
+                  asistente (ver `mergeCandidates` más arriba y `ChatPanel`); el botón confuso aparte
+                  se sacó. `/app/merge` sigue existiendo como deep-link, pero ya no tiene entry point
+                  primario acá. */}
+              <ProjectChatButton
+                projectId={activeProject.id}
+                projectName={activeProject.name}
+                mergeCandidates={mergeCandidates}
+              />
             </div>
 
             {subfolders.length === 0 && items.length === 0 ? (
