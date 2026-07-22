@@ -34,4 +34,30 @@ describe("resolveChatRequestConfig", () => {
       "Chat scope 'note' requires a transcriptionId."
     );
   });
+
+  it("scope 'project' con projectId devuelve /api/brain con message y projectId en el body", () => {
+    const config = resolveChatRequestConfig("project", undefined, message, "proj-1");
+    expect(config.api).toBe("/api/brain");
+    expect(config.body).toEqual({ message, projectId: "proj-1" });
+  });
+
+  it("scope 'project' ignora un transcriptionId pasado igual — nunca aparece en el body", () => {
+    const config = resolveChatRequestConfig("project", "trans-1", message, "proj-1");
+    expect(config.api).toBe("/api/brain");
+    expect(config.body).toEqual({ message, projectId: "proj-1" });
+    expect(Object.prototype.hasOwnProperty.call(config.body, "transcriptionId")).toBe(false);
+  });
+
+  it("scope 'project' sin projectId lanza", () => {
+    expect(() => resolveChatRequestConfig("project", undefined, message)).toThrow(
+      "Chat scope 'project' requires a projectId."
+    );
+  });
+
+  it("scope 'all' sin projectId sigue devolviendo solo message, sin cambios", () => {
+    const config = resolveChatRequestConfig("all", undefined, message, "proj-1");
+    expect(config.api).toBe("/api/brain");
+    expect(config.body).toEqual({ message });
+    expect(Object.prototype.hasOwnProperty.call(config.body, "projectId")).toBe(false);
+  });
 });

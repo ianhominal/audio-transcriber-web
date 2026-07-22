@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import * as Sentry from "@sentry/nextjs";
 import { streamText, type UIMessage } from "ai";
 import { groq } from "@ai-sdk/groq";
@@ -28,6 +29,15 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 type NoteRow = { id: string; title: string | null; text: string | null; summary: string | null; created_at: string };
+
+/** Validates an optional `projectId` in the request body (chat scope "project" — "Este proyecto").
+ * Defensive on purpose: a malformed value is REJECTED with 400 rather than silently ignored or
+ * passed through to Supabase as-is — same criteria as `TRANSCRIPTION_ID_SCHEMA`
+ * (`src/lib/mcp/tools.ts`), catching a bad id here instead of letting it reach Postgres as an
+ * "invalid input syntax for type uuid" error. This is scoping-only, never identity: the user id used
+ * for every query in this route still comes exclusively from `getApiUser(req)` (see header comment)
+ * — `projectId` can only narrow within that user's own already-scoped rows. */
+const PROJECT_ID_SCHEMA = z.uuid();
 
 /**
  * "Segundo cerebro" (feature 2026-07-13, see brief) — ask the AI a question grounded in ALL of the
@@ -72,11 +82,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { message?: unknown };
+  let body: { message?: unknown; projectId?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Cuerpo inválido." }, { status: 400 });
+  }
+
+  // Scope "project" ("Este proyecto"): `projectId` es OPCIONAL y solo ACOTA la búsqueda dentro de
+  // las notas ya scopeadas por `user_id` más abajo — nunca sustituye ese filtro ni participa en la
+  // identidad del pedido (ver comentario de `PROJECT_ID_SCHEMA`). Si viene pero no es un UUID válido,
+  // se rechaza con 400 en vez de ignorarlo silenciosamente o dejarlo pasar tal cual a Supabase.
+  let projectId: string | undefined;
+  if (body.projectId !== undefined && body.projectId !== null) {
+    const parsedProjectId = PROJECT_ID_SCHEMA.safeParse(body.projectId);
+    if (!parsedProjectId.success) {
+      return NextResponse.json({ error: "El proyecto indicado no es válido." }, { status: 400 });
+    }
+    projectId = parsedProjectId.data;
   }
 
   // Misma validación ESTRICTA que `/api/chat`: solo se acepta un objeto con `role: "user"` (nunca
@@ -105,16 +128,17 @@ export async function POST(req: NextRequest) {
   // 1) Retrieval: FTS por las notas del usuario más relacionadas con la pregunta (ver comentario de
   //    ownership arriba). Operación de lectura barata, corre ANTES del cap de costo — mismo criterio
   //    que la lectura de la transcripción en `/api/chat`.
-  const filters = buildRetrievalFilters(user.id, questionText);
-  const runFtsRetrieval = () =>
-    supabase
+  const filters = buildRetrievalFilters(user.id, questionText, projectId);
+  const runFtsRetrieval = () => {
+    let query = supabase
       .from("transcriptions")
       .select("id, title, text, summary, created_at")
       .eq("user_id", filters.userId)
       .is("deleted_at", null)
-      .textSearch("search_vector", filters.searchQuery, { type: "websearch", config: "spanish" })
-      .order("created_at", { ascending: false })
-      .limit(filters.limit);
+      .textSearch("search_vector", filters.searchQuery, { type: "websearch", config: "spanish" });
+    if (filters.projectId) query = query.eq("project_id", filters.projectId);
+    return query.order("created_at", { ascending: false }).limit(filters.limit);
+  };
 
   let retrievalData: NoteRow[] | null;
   const { data: ftsData, error: ftsError } = await runFtsRetrieval();
@@ -124,12 +148,14 @@ export async function POST(req: NextRequest) {
   } else if (isMissingColumnError(ftsError)) {
     // `search_vector` todavía sin migrar (ventana de rollout) — degrada a `ilike`, mismo criterio y
     // misma función de escape que `/api/notes/search`.
-    const { data: fallbackData, error: fallbackError } = await supabase
+    let ilikeQuery = supabase
       .from("transcriptions")
       .select("id, title, text, summary, created_at")
       .eq("user_id", filters.userId)
       .is("deleted_at", null)
-      .or(buildIlikeOrFilter(filters.searchQuery, ["title", "text", "summary"]))
+      .or(buildIlikeOrFilter(filters.searchQuery, ["title", "text", "summary"]));
+    if (filters.projectId) ilikeQuery = ilikeQuery.eq("project_id", filters.projectId);
+    const { data: fallbackData, error: fallbackError } = await ilikeQuery
       .order("created_at", { ascending: false })
       .limit(filters.limit);
 
@@ -166,11 +192,13 @@ export async function POST(req: NextRequest) {
   //      lectura gratis, no consume el cap diario de llamadas a Groq.
   let finalSourceNotes = sourceNotes;
   if (shouldFetchRecentFallback(sourceNotes.length)) {
-    const { data: recentData, error: recentError } = await supabase
+    let recentQuery = supabase
       .from("transcriptions")
       .select("id, title, text, summary, created_at")
       .eq("user_id", user.id)
-      .is("deleted_at", null)
+      .is("deleted_at", null);
+    if (filters.projectId) recentQuery = recentQuery.eq("project_id", filters.projectId);
+    const { data: recentData, error: recentError } = await recentQuery
       .order("created_at", { ascending: false })
       .limit(RETRIEVAL_TOP_K);
 
@@ -192,6 +220,28 @@ export async function POST(req: NextRequest) {
   }
 
   const { contextText } = buildBrainContext(finalSourceNotes);
+
+  // 1.6) Nombre del proyecto para el system prompt (scope "project" — "Este proyecto"), best-effort:
+  //      SOLO afecta cómo se redacta el prompt, nunca qué notas se leyeron (eso ya quedó resuelto
+  //      arriba). Mismo patrón RLS + filtro explícito redundante que el resto de la ruta —
+  //      `.eq("user_id", user.id)` viene de la sesión autenticada, nunca del body. Si falla o no
+  //      encuentra el proyecto (por ejemplo, uno borrado), seguimos sin nombre en vez de romper la
+  //      respuesta por un dato puramente cosmético.
+  let projectName: string | undefined;
+  if (filters.projectId) {
+    const { data: projectRow, error: projectError } = await supabase
+      .from("projects")
+      .select("name")
+      .eq("id", filters.projectId)
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (projectError) {
+      console.error("[brain] project name lookup failed", { userId: user.id, error: projectError.message });
+    } else {
+      projectName = (projectRow as { name: string } | null)?.name ?? undefined;
+    }
+  }
 
   // 2) Cap de costo/abuso por usuario/24h — reserve-on-attempt, mismo mecanismo atómico que el resto
   //    de las features IA de esta app (ver header comment).
@@ -230,7 +280,7 @@ export async function POST(req: NextRequest) {
 
   const result = streamText({
     model: groq(BRAIN_MODEL),
-    system: buildBrainSystemPrompt(contextText),
+    system: buildBrainSystemPrompt(contextText, projectName),
     prompt: questionText,
     maxOutputTokens: BRAIN_MAX_OUTPUT_TOKENS,
   });

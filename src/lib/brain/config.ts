@@ -65,20 +65,31 @@ export function isValidBrainQuestionText(text: string): boolean {
  * it's empty: retrieval found NOTHING relevant, so the prompt instructs the model to say exactly that
  * instead of inventing an answer from thin air (still costs one Groq call, kept simple — see the
  * route's header comment for why this isn't special-cased into a non-LLM response).
+ *
+ * `projectName` is optional (chat scope "project" — "Este proyecto", see `RetrievalFilters.projectId`
+ * in `src/lib/brain/retrieval.ts`): when provided, the prompt tells the model it's scoped to that ONE
+ * project so it doesn't imply it searched the user's whole archive. Omitted for the "all" scope
+ * (`undefined`), which keeps the prompt byte-for-byte identical to before this parameter existed.
  */
-export function buildBrainSystemPrompt(contextText: string): string {
+export function buildBrainSystemPrompt(contextText: string, projectName?: string): string {
+  const scopeNote = projectName
+    ? ` Esta búsqueda está ACOTADA al proyecto "${projectName}" — no es todo su archivo.`
+    : "";
+
   if (!contextText.trim()) {
     return (
       "Sos un asistente que responde preguntas basándote ÚNICAMENTE en las notas de audio " +
       "transcriptas de la usuaria. Para esta pregunta no se encontró NINGUNA nota relacionada en su " +
-      "archivo. Respondé con honestidad que no encontraste notas sobre ese tema — no inventes ni " +
-      "supongas contenido. Respondé siempre en español, de forma breve y directa."
+      `archivo.${scopeNote} Respondé con honestidad que no encontraste notas sobre ese tema — no ` +
+      "inventes ni supongas contenido. Respondé siempre en español, de forma breve y directa."
     );
   }
 
   return (
     "Sos un asistente que ayuda a una usuaria a explorar y recordar el contenido de SUS PROPIAS notas " +
-    "de audio transcriptas (su \"segundo cerebro\"). Tu única fuente de información es el conjunto de " +
+    "de audio transcriptas (su \"segundo cerebro\")." +
+    scopeNote +
+    " Tu única fuente de información es el conjunto de " +
     "notas que te paso más abajo — cada una es un FRAGMENTO real de algo que ella grabó y transcribió " +
     "en un momento distinto. No inventes datos, nombres, cifras ni hechos que no estén en esas notas. " +
     "Si la pregunta no la responde ninguna nota de las que tenés abajo, decilo con honestidad en vez " +

@@ -41,6 +41,18 @@ describe("buildRetrievalFilters (ownership)", () => {
     expect(b.userId).toBe("user-b");
     expect(a.userId).not.toBe(b.userId);
   });
+
+  it("sin projectId (scope 'all'): el filtro no incluye la propiedad, comportamiento sin cambios", () => {
+    const filters = buildRetrievalFilters("user-123", "pregunta");
+    expect(filters.projectId).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(filters, "projectId")).toBe(false);
+  });
+
+  it("con projectId (scope 'project' — 'Este proyecto'): lo incluye en el filtro tal cual, sin tocar userId", () => {
+    const filters = buildRetrievalFilters("user-123", "pregunta", "proj-1");
+    expect(filters.projectId).toBe("proj-1");
+    expect(filters.userId).toBe("user-123");
+  });
 });
 
 describe("buildBrainContext", () => {

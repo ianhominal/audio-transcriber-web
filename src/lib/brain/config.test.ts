@@ -37,4 +37,23 @@ describe("buildBrainSystemPrompt", () => {
   it("es pura: la misma entrada siempre da la misma salida", () => {
     expect(buildBrainSystemPrompt("contexto x")).toBe(buildBrainSystemPrompt("contexto x"));
   });
+
+  it("sin projectName (scope 'all'): el prompt queda idéntico a como estaba antes de este parámetro", () => {
+    expect(buildBrainSystemPrompt("## Nota 1 (2026-07-01)\nContenido.\n\n")).toBe(
+      buildBrainSystemPrompt("## Nota 1 (2026-07-01)\nContenido.\n\n", undefined)
+    );
+    expect(buildBrainSystemPrompt("")).toBe(buildBrainSystemPrompt("", undefined));
+  });
+
+  it("con projectName (scope 'project'): menciona el proyecto y que la búsqueda está acotada, con contexto", () => {
+    const prompt = buildBrainSystemPrompt("## Nota 1 (2026-07-01)\nContenido.\n\n", "Mi Proyecto");
+    expect(prompt).toContain("Mi Proyecto");
+    expect(prompt).toContain("ACOTADA");
+  });
+
+  it("con projectName y contexto vacío: también avisa el scope acotado en el mensaje de 'no encontré nada'", () => {
+    const prompt = buildBrainSystemPrompt("", "Mi Proyecto");
+    expect(prompt).toContain("no se encontró NINGUNA nota relacionada");
+    expect(prompt).toContain("Mi Proyecto");
+  });
 });

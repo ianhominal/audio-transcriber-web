@@ -35,30 +35,46 @@ const ALL_SUGGESTIONS = [
   "¿Tengo alguna tarea pendiente en mis notas?",
 ];
 
+/** Scope "project" ("Este proyecto") — mismo criterio de sugerencias por scope que `NOTE_SUGGESTIONS`/
+ * `ALL_SUGGESTIONS`, redactadas para una búsqueda acotada a UN proyecto en vez de todo el archivo. */
+const PROJECT_SUGGESTIONS = [
+  "Resumí las notas de este proyecto",
+  "¿Qué ideas repetidas aparecen en este proyecto?",
+  "¿Tengo alguna tarea pendiente en este proyecto?",
+];
+
 /**
  * Chat con IA unificado — UN solo componente, UN solo mental model para la usuaria: "Chat con
- * IA" con un selector de ALCANCE ("Esta nota" / "Todas mis notas") en vez de dos features
- * separadas (antes: `ChatPanel` por-transcripción + `BrainChat`/"Segundo cerebro" global, cada
- * una con su propia página y su propio chat). El backend NO cambia — sigue habiendo dos
- * endpoints (`/api/chat` y `/api/brain`, ver esos routes), solo cambia CUÁL llama el frontend
- * según el scope elegido. `resolveChatRequestConfig` (`src/lib/chat/scope.ts`) es el mapeo puro
- * scope → { api, body }, testeado sin mockear nada.
+ * IA" con un selector de ALCANCE ("Esta nota" / "Este proyecto" / "Todas mis notas") en vez de
+ * features separadas (antes: `ChatPanel` por-transcripción + `BrainChat`/"Segundo cerebro"
+ * global, cada una con su propia página y su propio chat). El backend NO cambia — sigue
+ * habiendo dos endpoints (`/api/chat` y `/api/brain`, ver esos routes), solo cambia CUÁL llama
+ * el frontend y QUÉ manda en el body según el scope elegido. `resolveChatRequestConfig`
+ * (`src/lib/chat/scope.ts`) es el mapeo puro scope → { api, body }, testeado sin mockear nada.
+ * "Este proyecto" pega contra el MISMO endpoint que "Todas mis notas" (`/api/brain`), solo que
+ * agrega `projectId` al body — la ruta acota la búsqueda a ese proyecto (ver
+ * `RetrievalFilters.projectId`, `src/lib/brain/retrieval.ts`).
  *
  * Dos instancias de `useChat` conviven SIEMPRE montadas (regla de hooks: no se puede llamar un
  * hook condicionalmente) — `noteChat` contra `/api/chat`, `allChat` contra `/api/brain` — y
- * `active` selecciona cuál se usa para renderizar/enviar según `scope`. Cada una mantiene su
- * PROPIO historial en memoria: `noteChat` arranca con `initialMessages` (persistido en
- * `chat_messages`, resuelto por el server component, ver `page.tsx`); `allChat` arranca vacío y
- * se queda así por diseño (ver comment de cabecera de `/api/brain/route.ts`: no hay
- * `initialMessages` ni persistencia server-side para el scope "all", a propósito, para no
+ * `active` selecciona cuál se usa para renderizar/enviar según `scope`. `allChat` sirve TANTO al
+ * scope "all" COMO al "project" (mismo endpoint, mismo historial en memoria): no hace falta una
+ * tercera instancia porque `prepareSendMessagesRequest` ya lee el scope efectivo y `projectId`
+ * en cada envío (se re-evalúa en cada render, así que siempre ve el valor vigente). Cada
+ * instancia mantiene su PROPIO historial en memoria: `noteChat` arranca con `initialMessages`
+ * (persistido en `chat_messages`, resuelto por el server component, ver `page.tsx`); `allChat`
+ * arranca vacío y se queda así por diseño (ver comment de cabecera de `/api/brain/route.ts`: no
+ * hay `initialMessages` ni persistencia server-side para "all"/"project", a propósito, para no
  * reintroducir la vulnerabilidad de historial fabricado por el cliente que `/api/chat` ya
- * corrigió). Cambiar el `<select>` de scope simplemente cambia CUÁL de las dos historias se ve
- * en pantalla — no se mezclan ni se pisan.
+ * corrigió). Cambiar el `<select>` de scope entre "note" y "all"/"project" cambia CUÁL de las
+ * dos historias se ve en pantalla; cambiar entre "all" y "project" se queda en la MISMA historia
+ * de `allChat` (comparten instancia), a propósito — es el mismo hilo de conversación, solo
+ * cambia qué notas se leen para la PRÓXIMA respuesta.
  *
- * El selector de scope solo se muestra cuando hay `transcriptionId` (la página por-nota tiene
- * ambos scopes disponibles). La página standalone "Todas mis notas" (`/app/brain`) no tiene
- * contexto de nota — queda fija en scope "all", sin selector, sin necesidad de un picker de
- * notas (fuera de alcance).
+ * El selector de scope se muestra cuando hay `transcriptionId` y/o `projectId` (según cuáles
+ * estén disponibles se ofrecen "Esta nota"/"Este proyecto"; "Todas mis notas" siempre está). La
+ * página standalone "Todas mis notas" (`/app/brain`) no tiene ni nota ni proyecto — queda fija
+ * en scope "all", sin selector.
  *
  * `prepareSendMessagesRequest` manda SOLO el mensaje nuevo (no el array completo de `messages`,
  * vía `resolveChatRequestConfig`) — el server reconstruye el historial leyendo `chat_messages`
@@ -78,16 +94,33 @@ export function ChatPanel({
   disabled = false,
   disabledReason,
   defaultScope = transcriptionId ? "note" : "all",
+  projectId,
+  projectName,
 }: {
   transcriptionId?: string;
   initialMessages?: UIMessage[];
   disabled?: boolean;
   disabledReason?: string;
   defaultScope?: ChatScope;
+  /** Scope "project" ("Este proyecto"): id del proyecto activo. Sin esto, el scope "project" nunca
+   * queda seleccionable (ver `effectiveScope` más abajo) ni aparece en el selector. */
+  projectId?: string;
+  /** Nombre del proyecto, solo para texto en pantalla (descripción/placeholder) — el backend
+   * resuelve el nombre por su cuenta para el system prompt (ver `/api/brain/route.ts`), esto NUNCA
+   * viaja al servidor. */
+  projectName?: string;
 }) {
   const { show: toast } = useToast();
   const [input, setInput] = useState("");
   const [scope, setScope] = useState<ChatScope>(defaultScope);
+
+  // Guardia defensiva: "note" sin `transcriptionId` y "project" sin `projectId` no son estados
+  // alcanzables desde el selector (cada opción solo se ofrece cuando su prop está presente), pero
+  // un futuro caller podría pasar un `defaultScope` inconsistente con las props por error — en vez
+  // de que `resolveChatRequestConfig` explote al enviar, degradamos a "all" acá, en un único lugar
+  // (mismo criterio que el hallazgo original del review adversarial para "note").
+  const effectiveScope: ChatScope =
+    (scope === "note" && !transcriptionId) || (scope === "project" && !projectId) ? "all" : scope;
 
   const noteChat = useChat({
     id: transcriptionId ?? "note-chat-inactive",
@@ -104,33 +137,46 @@ export function ChatPanel({
     id: "brain",
     transport: new DefaultChatTransport({
       api: "/api/brain",
+      // Sirve tanto al scope "all" como al "project" (ver header comment) — se reevalúa en cada
+      // render, así que siempre lee el `effectiveScope`/`projectId` vigentes al momento de enviar.
       prepareSendMessagesRequest: ({ messages: current }) => ({
-        body: resolveChatRequestConfig("all", undefined, current[current.length - 1]).body,
+        body: resolveChatRequestConfig(
+          effectiveScope === "project" ? "project" : "all",
+          undefined,
+          current[current.length - 1],
+          projectId
+        ).body,
       }),
     }),
   });
-
-  // Guardia defensiva: "note" sin `transcriptionId` no es un estado alcanzable desde el selector
-  // (solo se muestra con `transcriptionId` presente), pero un futuro caller podría pasar
-  // `defaultScope="note"` sin `transcriptionId` por error — en vez de que `resolveChatRequestConfig`
-  // explote al enviar, degradamos a "all" acá, en un único lugar (hallazgo del review adversarial).
-  const effectiveScope: ChatScope = scope === "note" && !transcriptionId ? "all" : scope;
 
   const active = effectiveScope === "note" ? noteChat : allChat;
   const { messages, sendMessage, status, error, regenerate, stop } = active;
 
   const busy = status === "submitted" || status === "streaming";
-  // El bloqueo por `disabled` (cambios de texto sin guardar) solo aplica al scope "note" — el
-  // scope "all" no está atado a ninguna transcripción puntual, así que nunca se bloquea por esto.
+  // El bloqueo por `disabled` (cambios de texto sin guardar) solo aplica al scope "note" — los
+  // scopes "all"/"project" no están atados a ninguna transcripción puntual, así que nunca se
+  // bloquean por esto.
   const scopeBlocked = effectiveScope === "note" && disabled;
   const inputDisabled = scopeBlocked || busy;
   const [saveNoteState, setSaveNoteState] = useState<Record<string, SaveNoteState>>({});
 
-  const suggestions = effectiveScope === "note" ? NOTE_SUGGESTIONS : ALL_SUGGESTIONS;
-  const placeholder = effectiveScope === "note" ? "Escribí tu pregunta…" : "Preguntá sobre todas tus notas…";
-  const inputAriaLabel = effectiveScope === "note" ? "Mensaje para la IA" : "Pregunta sobre todas tus notas";
+  const suggestions =
+    effectiveScope === "note" ? NOTE_SUGGESTIONS : effectiveScope === "project" ? PROJECT_SUGGESTIONS : ALL_SUGGESTIONS;
+  const placeholder =
+    effectiveScope === "note"
+      ? "Escribí tu pregunta…"
+      : effectiveScope === "project"
+        ? "Preguntá sobre este proyecto…"
+        : "Preguntá sobre todas tus notas…";
+  const inputAriaLabel =
+    effectiveScope === "note"
+      ? "Mensaje para la IA"
+      : effectiveScope === "project"
+        ? "Pregunta sobre este proyecto"
+        : "Pregunta sobre todas tus notas";
   const pendingText = effectiveScope === "note" ? "Pensando…" : "Buscando en tus notas…";
-  const maxLength = effectiveScope === "all" ? MAX_BRAIN_QUESTION_CHARS : undefined;
+  const maxLength = effectiveScope !== "note" ? MAX_BRAIN_QUESTION_CHARS : undefined;
 
   /**
    * "Guardar como nota" (quick win del brainstorm, ver ROADMAP.md): crea una transcripción
@@ -189,7 +235,7 @@ export function ChatPanel({
     <div className="mt-5 rounded-xl border border-border-strong bg-surface p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-foreground">Chat con IA</h3>
-        {transcriptionId && (
+        {(transcriptionId || projectId) && (
           <div>
             <label htmlFor="chat-scope" className="sr-only">
               Alcance del chat
@@ -200,7 +246,8 @@ export function ChatPanel({
               onChange={(e) => setScope(e.target.value as ChatScope)}
               className="rounded-lg border border-border-strong bg-background px-2 py-1 text-xs text-foreground focus:border-accent focus:outline-none"
             >
-              <option value="note">Esta nota</option>
+              {transcriptionId && <option value="note">Esta nota</option>}
+              {projectId && <option value="project">Este proyecto</option>}
               <option value="all">Todas mis notas</option>
             </select>
           </div>
@@ -209,7 +256,9 @@ export function ChatPanel({
       <p className="mt-1 text-xs text-tertiary">
         {effectiveScope === "note"
           ? "Preguntale a la IA sobre esta transcripción: pedile un resumen, ideas clave, una lista de tareas o lo que necesites."
-          : "Preguntale a la IA sobre todas tus notas: pedile que junte ideas repartidas en varias transcripciones, que te recuerde qué dijiste sobre un tema, o que busque tareas pendientes."}
+          : effectiveScope === "project"
+            ? `Preguntale a la IA sobre las notas de${projectName ? ` "${projectName}"` : " este proyecto"}: pedile un resumen, que junte ideas repartidas en varias notas, o que busque tareas pendientes.`
+            : "Preguntale a la IA sobre todas tus notas: pedile que junte ideas repartidas en varias transcripciones, que te recuerde qué dijiste sobre un tema, o que busque tareas pendientes."}
       </p>
 
       {effectiveScope === "note" && disabled && disabledReason && (

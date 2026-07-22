@@ -21,6 +21,7 @@ import {
 import { DashboardShell } from "./dashboard-shell";
 import { NewProjectButton } from "./new-project-button";
 import { NewSubfolderButton } from "./new-subfolder-button";
+import { ProjectChatButton } from "./project-chat-button";
 import { ProjectHeader } from "./project-header";
 import { ProjectTree } from "./project-tree";
 import { OnboardingWelcome } from "@/components/app/onboarding-welcome";
@@ -386,6 +387,10 @@ export default async function Dashboard({
                   <Icon name="merge" /> Unir en un documento
                 </Link>
               )}
+              {/* Chat con IA acotado a este proyecto ("Este proyecto" — feature 2026-07-22, ver
+                  `ChatPanel`/`src/lib/chat/scope.ts`): entry point desde la vista de proyecto,
+                  mismo criterio de navegación por `?project=<id>` que "Unir en un documento". */}
+              <ProjectChatButton projectId={activeProject.id} projectName={activeProject.name} />
             </div>
 
             {subfolders.length === 0 && items.length === 0 ? (

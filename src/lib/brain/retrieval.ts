@@ -19,6 +19,13 @@ export type RetrievalFilters = {
   /** Sanitized (trimmed + length-capped) search text, ready for `websearch_to_tsquery`. */
   searchQuery: string;
   limit: number;
+  /** Optional "Este proyecto" scope (chat scope "project"): when set, retrieval narrows to notes
+   * inside this ONE project on top of the `userId` filter — it never replaces `userId`, only adds a
+   * further `.eq("project_id", ...)` restriction within the caller's own already-scoped rows. Unlike
+   * `userId`, this value is allowed to come from the request body (see the route's header comment):
+   * a caller can only ever narrow their own notes with it, never widen or redirect the query to
+   * another user's data, so it carries no IDOR risk on its own. */
+  projectId?: string;
 };
 
 /**
@@ -27,14 +34,20 @@ export type RetrievalFilters = {
  * `question` or anywhere else, so it can't be tricked into retrieving another user's notes no matter
  * what `question` contains. The route applies this descriptor as `.eq("user_id", filters.userId)`
  * (defense in depth ON TOP of RLS, same criteria the brief calls out explicitly for this feature).
+ *
+ * `projectId` is optional (chat scope "project" — "Este proyecto"): when provided, it's threaded
+ * through unchanged into the returned filters so the route can additionally apply
+ * `.eq("project_id", filters.projectId)`. Omitted/`undefined` preserves the original "Todas mis
+ * notas" behavior byte-for-byte.
  */
-export function buildRetrievalFilters(userId: string, question: string): RetrievalFilters {
+export function buildRetrievalFilters(userId: string, question: string, projectId?: string): RetrievalFilters {
   return {
     table: "transcriptions",
     userId,
     excludeDeleted: true,
     searchQuery: sanitizeSearchQuery(question),
     limit: RETRIEVAL_TOP_K,
+    ...(projectId ? { projectId } : {}),
   };
 }
 
