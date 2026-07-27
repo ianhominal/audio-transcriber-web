@@ -191,6 +191,21 @@ describe("POST /api/brain — scope 'project': projectId válido acota la búsqu
     expect(hasEqCall(supabase.ftsCalls, "user_id", "u1")).toBe(true);
   });
 
+  it("acepta un id estilo desktop (HashId) con nibble de versión fuera de RFC (bugfix 2026-07-22)", async () => {
+    // z.uuid() estricto rechazaba estos ids VÁLIDOS-para-Postgres que genera el cliente desktop
+    // (nibble de versión 0/9 por el layout mixed-endian de .NET Guid), rompiendo el "Asistente del
+    // proyecto" con "El proyecto indicado no es válido". El chequeo de forma (regex) los acepta.
+    const desktopId = "c1b6bf10-83c6-0947-aa9d-b6ba0747478a"; // nibble de versión = 0 (no RFC)
+    const supabase = createMockSupabase({});
+    mockUser(supabase);
+    mockStreamTextResult();
+
+    const res = await postBrain({ message: validMessage, projectId: desktopId });
+
+    expect(res.status).toBe(200);
+    expect(hasEqCall(supabase.ftsCalls, "project_id", desktopId)).toBe(true);
+  });
+
   it("busca el nombre del proyecto scopeado por user_id (RLS + filtro explícito redundante) para el system prompt", async () => {
     const supabase = createMockSupabase({ projectResult: { data: { name: "Proyecto Test" }, error: null } });
     mockUser(supabase);

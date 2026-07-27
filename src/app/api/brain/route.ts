@@ -32,12 +32,23 @@ type NoteRow = { id: string; title: string | null; text: string | null; summary:
 
 /** Validates an optional `projectId` in the request body (chat scope "project" — "Este proyecto").
  * Defensive on purpose: a malformed value is REJECTED with 400 rather than silently ignored or
- * passed through to Supabase as-is — same criteria as `TRANSCRIPTION_ID_SCHEMA`
- * (`src/lib/mcp/tools.ts`), catching a bad id here instead of letting it reach Postgres as an
- * "invalid input syntax for type uuid" error. This is scoping-only, never identity: the user id used
- * for every query in this route still comes exclusively from `getApiUser(req)` (see header comment)
- * — `projectId` can only narrow within that user's own already-scoped rows. */
-const PROJECT_ID_SCHEMA = z.uuid();
+ * passed through to Supabase as-is, catching a bad id here instead of letting it reach Postgres as
+ * an "invalid input syntax for type uuid" error. This is scoping-only, never identity: the user id
+ * used for every query in this route still comes exclusively from `getApiUser(req)` (see header
+ * comment) — `projectId` can only narrow within that user's own already-scoped rows.
+ *
+ * SHAPE check, NOT strict RFC `z.uuid()` (bugfix 2026-07-22): the desktop client generates
+ * deterministic project/transcription ids (its `HashId`) that ARE valid Postgres uuids but whose
+ * version/variant nibbles land in the wrong byte position due to .NET's mixed-endian `Guid(byte[])`
+ * layout — so a chunk of them fail Zod's strict `z.uuid()` (which requires an RFC version 1-8 at the
+ * canonical offset). That broke the desktop "Asistente del proyecto" with "El proyecto indicado no
+ * es válido" for any project whose id happened to land on an out-of-range version nibble (e.g.
+ * `...-0947-...` / `...-9841-...`). Postgres accepts any 8-4-4-4-12 hex for its `uuid` type, so a
+ * shape regex is the right fidelity here: it still blocks injection/garbage, and the actual safety
+ * comes from the AND'd `user_id` filter + RLS, not from the version bits. */
+const PROJECT_ID_SCHEMA = z
+  .string()
+  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/);
 
 /**
  * "Segundo cerebro" (feature 2026-07-13, see brief) — ask the AI a question grounded in ALL of the
