@@ -9,6 +9,13 @@ import {
   markSchemaCompatResult,
   shouldRedetectSchemaCompat,
 } from "@/lib/supabase/schema-compat";
+import { computeAudioState, resolveMemberCountsByProject } from "@/lib/sync/audioState";
+
+// Team Sharing slice 1b, Phase 12 (ADR-04, spec "TTL de signed URLs acotado a la ventana de
+// revocación"): a signed URL bypasses RLS entirely, so its TTL IS the real revocation window once
+// a collaborator loses access. 600s (10 min) replaces the previous 3600s — plenty for the client
+// to start the download, short enough that a revoked viewer can't keep reusing a stale link.
+const AUDIO_SIGNED_URL_TTL_SECONDS = 600;
 
 export const runtime = "nodejs";
 
@@ -84,8 +91,15 @@ type TranscriptionRow = {
 
 async function fetchProjectsCompat(supabase: SupabaseClient, userId: string, since: string | null) {
   const now = Date.now();
+  // Team Sharing slice 1b, Phase 13 (CRÍTICO-2, spec "Las lecturas dejan de filtrar por user_id
+  // en código"): no `.eq("user_id", userId)` here anymore. The `projects: read` RLS policy
+  // (`20260728160000_rls_projects_transcriptions.sql`) already resolves "own row OR a shared
+  // project the caller can read via `has_root_access`" — reintroducing a manual `user_id` filter
+  // would silently hide a viewer's shared projects from their pull, exactly the bug this phase
+  // closes. `userId` is still threaded through below (schema-compat caching, error logging), just
+  // never applied as a query filter.
   const runQuery = (columns: string) => {
-    let q = supabase.from("projects").select(columns).eq("user_id", userId);
+    let q = supabase.from("projects").select(columns);
     if (since) q = q.gt("updated_at", since);
     return q;
   };
@@ -129,8 +143,12 @@ export async function GET(req: NextRequest) {
     const since = req.nextUrl.searchParams.get("since");
     const serverTime = new Date().toISOString();
 
+    // Team Sharing slice 1b, Phase 13 (CRÍTICO-2): no `.eq("user_id", user.id)` here either — the
+    // `transcriptions: read` RLS policy resolves "own row OR (project_id IS NOT NULL AND shared
+    // project the caller can read)". A note with `project_id IS NULL` stays private by
+    // construction on the RLS side (see the policy's own comment), never through a code filter.
     const runTranscriptionsQuery = (columns: string) => {
-      let q = supabase.from("transcriptions").select(columns).eq("user_id", user.id);
+      let q = supabase.from("transcriptions").select(columns);
       if (since) q = q.gt("updated_at", since);
       return q;
     };
@@ -161,6 +179,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "No se pudo leer los cambios." }, { status: 500 });
     }
 
+    // Team Sharing slice 1b, Phase 11 (ADR-14 §3, spec "Estado de audio explícito en el
+    // read-path"): `audio_state` needs to know how many members the project's root has, resolved
+    // once for the whole batch (not per-row) so a pull with many notes stays at two extra queries
+    // total instead of N — see `resolveMemberCountsByProject` for the degrade behavior when Phase
+    // 1/2 are not applied yet.
+    const memberCountsByProject = await resolveMemberCountsByProject(
+      supabase,
+      (transcriptions ?? []).map((t) => t.project_id)
+    );
+
     // Signed URL temporal por cada audio, para que el cliente desktop pueda descargarlo
     // (el bucket es privado). Se generan en paralelo para no bloquear en serie.
     const transcriptionsWithAudio = await Promise.all(
@@ -168,10 +196,14 @@ export async function GET(req: NextRequest) {
         // Mirrors `withDefaultDriveSyncFields`: in reduced mode `version` was not selected, and the
         // client must still receive a usable value rather than an absent field.
         const withVersion = { ...t, version: t.version ?? 1 };
-        if (!t.audio_url) return { ...withVersion, audio_url_signed: null };
+        const audioState = computeAudioState(
+          t.audio_url,
+          t.project_id ? (memberCountsByProject.get(t.project_id) ?? 1) : 1
+        );
+        if (!t.audio_url) return { ...withVersion, audio_url_signed: null, audio_state: audioState };
         const { data: signed, error: signError } = await supabase.storage
           .from(AUDIO_BUCKET)
-          .createSignedUrl(t.audio_url, 60 * 60);
+          .createSignedUrl(t.audio_url, AUDIO_SIGNED_URL_TTL_SECONDS);
         if (signError) {
           // Visibility only: on failure we still return audio_url_signed: null, same as
           // before — this does not change behavior, it just stops the failure from being
@@ -186,7 +218,7 @@ export async function GET(req: NextRequest) {
             extra: { transcriptionId: t.id, audioUrl: t.audio_url, stage: "sync-pull-signed-url" },
           });
         }
-        return { ...withVersion, audio_url_signed: signed?.signedUrl ?? null };
+        return { ...withVersion, audio_url_signed: signed?.signedUrl ?? null, audio_state: audioState };
       })
     );
 

@@ -66,12 +66,17 @@ const PROJECT_ID_SCHEMA = z
  * question is answered independently — multi-turn memory is a follow-up (documented in ROADMAP.md
  * alongside semantic search), not silently faked with an unsafe shortcut.
  *
- * OWNERSHIP — anti-IDOR: retrieval is built via `buildRetrievalFilters(user.id, question)`
- * (`src/lib/brain/retrieval.ts`), where `user.id` comes ONLY from `getApiUser(req)` (the authenticated
- * session) — never from the request body — and applied as `.eq("user_id", filters.userId)` in
- * ADDITION to RLS (defense in depth, same criteria as `/api/notes/search` and `/api/notes/merge`).
- * There is no code path anywhere in this route that lets `question` influence which user's notes get
- * read.
+ * OWNERSHIP — Team Sharing slice 1b, Phase 14 (design ADR-05, spec "MCP y el asistente de IA
+ * alcanzan lo compartido en lectura"): unlike MCP (`lib/mcp/tools.ts`, service-role, RLS bypassed),
+ * this route runs through `getApiUser(req)` — a session-scoped client where RLS is ALWAYS active.
+ * The `transcriptions: read` policy (`20260728160000_rls_projects_transcriptions.sql`) already
+ * resolves to "own row, OR a shared project the caller can read" — the exact definition of
+ * "proyectos accesibles" the spec asks for. Every retrieval/fallback query below therefore does
+ * NOT add its own `.eq("user_id", ...)` filter: doing so would UNDO the widening RLS already
+ * grants and silently hide a viewer's shared-project notes from Segundo cerebro, same failure mode
+ * `/api/sync/pull` had before Phase 13 (CRÍTICO-2) fixed it the same way. `question` still cannot
+ * influence WHICH user's session is scoping the query — that always comes from `getApiUser(req)`,
+ * never the request body.
  *
  * Cost cap: reserve-on-attempt on `ai_usage_log` (`kind: "brain"`) BEFORE calling Groq, same atomic
  * mechanism (`BEFORE INSERT` trigger, migration `20260713160000_ai_usage_brain.sql`) as the rest of
@@ -140,11 +145,13 @@ export async function POST(req: NextRequest) {
   //    ownership arriba). Operación de lectura barata, corre ANTES del cap de costo — mismo criterio
   //    que la lectura de la transcripción en `/api/chat`.
   const filters = buildRetrievalFilters(user.id, questionText, projectId);
+  // No `.eq("user_id", ...)` here — see the OWNERSHIP header comment above (Phase 14): the RLS
+  // policy on `transcriptions` already scopes to "own OR accessible shared project", and this
+  // client respects RLS (`getApiUser`, not service-role).
   const runFtsRetrieval = () => {
     let query = supabase
       .from("transcriptions")
       .select("id, title, text, summary, created_at")
-      .eq("user_id", filters.userId)
       .is("deleted_at", null)
       .textSearch("search_vector", filters.searchQuery, { type: "websearch", config: "spanish" });
     if (filters.projectId) query = query.eq("project_id", filters.projectId);
@@ -159,10 +166,10 @@ export async function POST(req: NextRequest) {
   } else if (isMissingColumnError(ftsError)) {
     // `search_vector` todavía sin migrar (ventana de rollout) — degrada a `ilike`, mismo criterio y
     // misma función de escape que `/api/notes/search`.
+    // Same reasoning as `runFtsRetrieval` above: no `.eq("user_id", ...)`, RLS already scopes this.
     let ilikeQuery = supabase
       .from("transcriptions")
       .select("id, title, text, summary, created_at")
-      .eq("user_id", filters.userId)
       .is("deleted_at", null)
       .or(buildIlikeOrFilter(filters.searchQuery, ["title", "text", "summary"]));
     if (filters.projectId) ilikeQuery = ilikeQuery.eq("project_id", filters.projectId);
@@ -203,10 +210,10 @@ export async function POST(req: NextRequest) {
   //      lectura gratis, no consume el cap diario de llamadas a Groq.
   let finalSourceNotes = sourceNotes;
   if (shouldFetchRecentFallback(sourceNotes.length)) {
+    // No `.eq("user_id", ...)` — same reasoning as `runFtsRetrieval` (Phase 14 header comment).
     let recentQuery = supabase
       .from("transcriptions")
       .select("id, title, text, summary, created_at")
-      .eq("user_id", user.id)
       .is("deleted_at", null);
     if (filters.projectId) recentQuery = recentQuery.eq("project_id", filters.projectId);
     const { data: recentData, error: recentError } = await recentQuery
@@ -234,9 +241,12 @@ export async function POST(req: NextRequest) {
 
   // 1.6) Nombre del proyecto para el system prompt (scope "project" — "Este proyecto"), best-effort:
   //      SOLO afecta cómo se redacta el prompt, nunca qué notas se leyeron (eso ya quedó resuelto
-  //      arriba). Mismo patrón RLS + filtro explícito redundante que el resto de la ruta —
-  //      `.eq("user_id", user.id)` viene de la sesión autenticada, nunca del body. Si falla o no
-  //      encuentra el proyecto (por ejemplo, uno borrado), seguimos sin nombre en vez de romper la
+  //      arriba). Este es el "resolveProjectNames" que el design ADR-05 menciona: sin scopear por
+  //      proyectos accesibles (Phase 14), un viewer de un proyecto compartido vería su ID crudo en
+  //      vez del nombre en el prompt. NO `.eq("user_id", user.id)` — la policy `projects: read`
+  //      (`20260728160000_rls_projects_transcriptions.sql`) ya resuelve "dueño O acceso compartido"
+  //      y este cliente respeta RLS (`getApiUser`, no service-role). Si falla o no encuentra el
+  //      proyecto (por ejemplo, uno borrado o inaccesible), seguimos sin nombre en vez de romper la
   //      respuesta por un dato puramente cosmético.
   let projectName: string | undefined;
   if (filters.projectId) {
@@ -244,7 +254,6 @@ export async function POST(req: NextRequest) {
       .from("projects")
       .select("name")
       .eq("id", filters.projectId)
-      .eq("user_id", user.id)
       .is("deleted_at", null)
       .maybeSingle();
     if (projectError) {

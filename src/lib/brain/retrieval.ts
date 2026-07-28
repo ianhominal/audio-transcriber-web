@@ -13,7 +13,10 @@ export type RetrievalFilters = {
   table: "transcriptions";
   /** ALWAYS the authenticated user's id — see the route's header comment: this value comes only from
    * `getApiUser(req)` (server-side session), never from the request body, so there is no input a
-   * caller could supply to widen this filter to someone else's notes (no IDOR surface here). */
+   * caller could supply to widen access to someone else's notes (no IDOR surface here). Team Sharing
+   * slice 1b, Phase 14: the route does NOT apply this as a query `.eq("user_id", ...)` filter anymore
+   * (RLS already scopes to "own OR accessible shared project" — see the route's OWNERSHIP comment);
+   * it is kept here for logging/attribution (`ai_usage_log`, error reporting), not as an access filter. */
   userId: string;
   excludeDeleted: true;
   /** Sanitized (trimmed + length-capped) search text, ready for `websearch_to_tsquery`. */

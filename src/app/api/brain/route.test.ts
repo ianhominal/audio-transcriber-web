@@ -187,8 +187,11 @@ describe("POST /api/brain — scope 'project': projectId válido acota la búsqu
 
     expect(res.status).toBe(200);
     expect(hasEqCall(supabase.ftsCalls, "project_id", "11111111-1111-4111-8111-111111111111")).toBe(true);
-    // El filtro de ownership sigue viniendo SIEMPRE de la sesión autenticada, nunca del body.
-    expect(hasEqCall(supabase.ftsCalls, "user_id", "u1")).toBe(true);
+    // Team Sharing slice 1b, Phase 14: la sesión autenticada (`getApiUser`) sigue siendo la ÚNICA
+    // fuente de identidad, pero ya NO se agrega un `.eq("user_id", ...)` — la RLS de
+    // `transcriptions: read` ya resuelve "propia O de un proyecto compartido accesible", y
+    // reintroducir el filtro acá ocultaría las notas compartidas de un viewer (ver siguiente bloque).
+    expect(hasEqCall(supabase.ftsCalls, "user_id", "u1")).toBe(false);
   });
 
   it("acepta un id estilo desktop (HashId) con nibble de versión fuera de RFC (bugfix 2026-07-22)", async () => {
@@ -206,7 +209,7 @@ describe("POST /api/brain — scope 'project': projectId válido acota la búsqu
     expect(hasEqCall(supabase.ftsCalls, "project_id", desktopId)).toBe(true);
   });
 
-  it("busca el nombre del proyecto scopeado por user_id (RLS + filtro explícito redundante) para el system prompt", async () => {
+  it("busca el nombre del proyecto SOLO por id — sin filtro user_id, deja que la RLS decida si es accesible (Phase 14)", async () => {
     const supabase = createMockSupabase({ projectResult: { data: { name: "Proyecto Test" }, error: null } });
     mockUser(supabase);
     mockStreamTextResult();
@@ -214,7 +217,9 @@ describe("POST /api/brain — scope 'project': projectId válido acota la búsqu
     await postBrain({ message: validMessage, projectId: "11111111-1111-4111-8111-111111111111" });
 
     expect(hasEqCall(supabase.projectCalls, "id", "11111111-1111-4111-8111-111111111111")).toBe(true);
-    expect(hasEqCall(supabase.projectCalls, "user_id", "u1")).toBe(true);
+    // Sin esto, un viewer nunca podría resolver el nombre de un proyecto compartido (pertenece a
+    // otro user_id) — vería el id crudo en el prompt, el problema que ADR-05 marca explícitamente.
+    expect(hasEqCall(supabase.projectCalls, "user_id", "u1")).toBe(false);
     const call = vi.mocked(streamText).mock.calls[0][0];
     expect(call.system).toContain("Proyecto Test");
   });
@@ -264,5 +269,31 @@ describe("POST /api/brain — sin projectId: comportamiento sin cambios", () => 
     expect(groq).toHaveBeenCalled();
     const call = vi.mocked(streamText).mock.calls[0][0];
     expect(call.maxOutputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/brain — Team Sharing slice 1b, Phase 14: CRÍTICO-2 aplicado a /api/brain (ADR-05)", () => {
+  it("el fallback de notas recientes tampoco filtra por user_id — RLS decide, igual que la consulta FTS principal", async () => {
+    // Menos de MIN_RETRIEVAL_RESULTS_BEFORE_FALLBACK (3) filas dispara la query de "recent notes".
+    const supabase = createMockSupabase({ ftsResult: { data: [NOTE_ROW], error: null } });
+    mockUser(supabase);
+    mockStreamTextResult();
+
+    const res = await postBrain({ message: validMessage });
+
+    expect(res.status).toBe(200);
+    expect(supabase.transcriptionsCallCount()).toBe(2); // FTS + recent fallback
+    expect(hasEqCall(supabase.ftsCalls, "user_id", "u1")).toBe(false);
+  });
+
+  it("regresión — ninguna de las consultas a transcriptions/projects agrega un filtro user_id", async () => {
+    const supabase = createMockSupabase({});
+    mockUser(supabase);
+    mockStreamTextResult();
+
+    await postBrain({ message: validMessage, projectId: "11111111-1111-4111-8111-111111111111" });
+
+    const eqCalls = [...supabase.ftsCalls, ...supabase.projectCalls].filter(([method]) => method === "eq");
+    expect(eqCalls.some(([, args]) => args[0] === "user_id")).toBe(false);
   });
 });

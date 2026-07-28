@@ -20,6 +20,21 @@ import {
 // service-role client hitting real tables with no RLS: whatever `tools.ts` fails to filter, leaks.
 type Row = Record<string, unknown>;
 
+/** Evaluates ONE PostgREST filter clause (`col.op.value`) against a single row — the same shape
+ * `buildOwnOrAccessibleFilter` (`./permissions.ts`) produces. Only `eq`/`in` are needed here,
+ * matching what `tools.ts` actually emits. */
+function evalClause(row: Row, clause: string): boolean {
+  const [col, op, ...rest] = clause.split(".");
+  const rawValue = rest.join(".");
+  if (op === "eq") return String(row[col] ?? "") === rawValue;
+  if (op === "in") {
+    const inner = rawValue.replace(/^\(/, "").replace(/\)$/, "");
+    const values = inner.length > 0 ? inner.split(",") : [];
+    return values.includes(String(row[col] ?? ""));
+  }
+  return false;
+}
+
 function createFakeQuery(seedRows: Row[]) {
   let rows = seedRows;
   const builder = {
@@ -29,6 +44,14 @@ function createFakeQuery(seedRows: Row[]) {
     },
     is(col: string, val: unknown) {
       rows = rows.filter((r) => r[col] === val);
+      return builder;
+    },
+    // Real Supabase composes `.or(str)` as an OR of the clauses inside `str`, AND'd with every
+    // other filter already applied on the chain — same as the rest of this fake, which mutates
+    // `rows` progressively rather than deferring evaluation.
+    or(filterStr: string) {
+      const clauses = filterStr.split(",");
+      rows = rows.filter((r) => clauses.some((clause) => evalClause(r, clause)));
       return builder;
     },
     order(col: string, opts?: { ascending?: boolean }) {
@@ -55,12 +78,29 @@ function createFakeQuery(seedRows: Row[]) {
   return builder;
 }
 
-function createFakeSupabase(tables: { transcriptions?: Row[]; projects?: Row[] }) {
+/**
+ * `accessibleProjectIds` defaults to `[]` — same as a caller with no shared-project membership —
+ * so every EXISTING test in this file (written before Team Sharing slice 1b, Phase 14) keeps
+ * behaving exactly as before: `buildOwnOrAccessibleFilter` degrades to `user_id.eq.<caller>` only
+ * when the accessible list is empty, matching the old bare `.eq("user_id", userId)`.
+ */
+function createFakeSupabase(
+  tables: { transcriptions?: Row[]; projects?: Row[] },
+  accessibleProjectIds: string[] = []
+) {
   return {
     from(table: string) {
       if (table === "transcriptions") return { select: () => createFakeQuery(tables.transcriptions ?? []) };
       if (table === "projects") return { select: () => createFakeQuery(tables.projects ?? []) };
       throw new Error(`Unexpected table in test: ${table}`);
+    },
+    rpc(fn: string, args: Record<string, unknown>) {
+      if (fn !== "accessible_project_ids") throw new Error(`Unexpected rpc in test: ${fn}`);
+      if (args.p_capability !== "read") throw new Error(`Unexpected capability in test: ${args.p_capability}`);
+      return Promise.resolve({
+        data: accessibleProjectIds.map((id) => ({ accessible_project_ids: id })),
+        error: null,
+      });
     },
   } as never;
 }
@@ -439,5 +479,101 @@ describe("searchTranscriptions", () => {
     const result = await searchTranscriptions(supabase, "user-A", { query: "kubernetes" });
     const items = parseJson(result) as Array<{ id: string }>;
     expect(items.map((i) => i.id)).toEqual(["a1"]);
+  });
+});
+
+describe("Team Sharing slice 1b, Phase 14 — MCP reads reach shared projects via accessible_project_ids", () => {
+  it("listTranscriptions includes a note from a project shared with the caller, owned by someone else", async () => {
+    const supabase = createFakeSupabase(
+      {
+        transcriptions: [
+          makeTranscriptionRow({ id: "own-1", user_id: "user-A", project_id: null }),
+          makeTranscriptionRow({ id: "shared-1", user_id: "owner-B", project_id: "p-shared" }),
+          makeTranscriptionRow({ id: "unshared-1", user_id: "owner-C", project_id: "p-not-shared" }),
+        ],
+        projects: [{ id: "p-shared", user_id: "owner-B", name: "Proyecto compartido" }],
+      },
+      ["p-shared"] // accessible_project_ids(user-A, 'read') — only the shared project, never p-not-shared
+    );
+
+    const result = await listTranscriptions(supabase, "user-A", {});
+    const items = parseJson(result) as Array<{ id: string; project: string | null }>;
+
+    expect(items.map((i) => i.id).sort()).toEqual(["own-1", "shared-1"]);
+    expect(items.find((i) => i.id === "shared-1")?.project).toBe("Proyecto compartido");
+  });
+
+  it("getTranscription returns the detail of a shared-project transcription owned by another user", async () => {
+    const supabase = createFakeSupabase(
+      {
+        transcriptions: [
+          makeTranscriptionRow({ id: "shared-1", user_id: "owner-B", project_id: "p-shared", text: "shared content" }),
+        ],
+        projects: [{ id: "p-shared", user_id: "owner-B", name: "Proyecto compartido" }],
+      },
+      ["p-shared"]
+    );
+
+    const result = await getTranscription(supabase, "user-A", { id: "shared-1" });
+
+    expect(result.isError).toBeFalsy();
+    const detail = parseJson(result) as { text: string; project: string | null };
+    expect(detail.text).toBe("shared content");
+    expect(detail.project).toBe("Proyecto compartido");
+  });
+
+  it("getTranscription still returns not-found for a project NOT in the caller's accessible list", async () => {
+    const supabase = createFakeSupabase(
+      {
+        transcriptions: [
+          makeTranscriptionRow({ id: "unshared-1", user_id: "owner-C", project_id: "p-not-shared", text: "private" }),
+        ],
+        projects: [{ id: "p-not-shared", user_id: "owner-C", name: "No compartido" }],
+      },
+      [] // caller has no shared-project access at all
+    );
+
+    const result = await getTranscription(supabase, "user-A", { id: "unshared-1" });
+
+    expect(result.isError).toBe(true);
+    expect(contentText(result)).not.toContain("private");
+  });
+
+  it("a private note (project_id null) belonging to another user stays unreachable even when projects ARE shared", async () => {
+    // The asymmetry the spec calls out explicitly: `accessible_project_ids` widens what a shared
+    // PROJECT exposes, but a note with no project is private by construction and never reachable
+    // through project membership, no matter how many other projects are shared with the caller.
+    const supabase = createFakeSupabase(
+      {
+        transcriptions: [
+          makeTranscriptionRow({ id: "private-1", user_id: "owner-B", project_id: null, text: "owner-B's private note" }),
+        ],
+        projects: [],
+      },
+      ["p-shared"]
+    );
+
+    const result = await getTranscription(supabase, "user-A", { id: "private-1" });
+
+    expect(result.isError).toBe(true);
+    expect(contentText(result)).not.toContain("owner-B's private note");
+  });
+
+  it("searchTranscriptions matches text inside a shared project's transcription", async () => {
+    const supabase = createFakeSupabase(
+      {
+        transcriptions: [
+          makeTranscriptionRow({ id: "shared-1", user_id: "owner-B", project_id: "p-shared", text: "talks about kubernetes" }),
+        ],
+        projects: [{ id: "p-shared", user_id: "owner-B", name: "Proyecto compartido" }],
+      },
+      ["p-shared"]
+    );
+
+    const result = await searchTranscriptions(supabase, "user-A", { query: "kubernetes" });
+    const items = parseJson(result) as Array<{ id: string; project: string | null }>;
+
+    expect(items.map((i) => i.id)).toEqual(["shared-1"]);
+    expect(items[0].project).toBe("Proyecto compartido");
   });
 });

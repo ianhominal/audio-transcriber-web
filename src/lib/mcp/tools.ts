@@ -11,11 +11,17 @@
  *
  * Every query runs against the service-role client (`src/lib/supabase/serviceRole.ts` — bypasses
  * RLS entirely, since there is no logged-in session for an MCP bearer token), so every single
- * query below filters explicitly by `.eq("user_id", userId)` — same discipline as
- * `src/app/api/cron/drive-sync/route.ts`, with zero exceptions. `getTranscription` in particular
- * filters by `id` AND `user_id` together in the SAME query — never fetch-by-id-then-check-owner
- * in application code, which would leave a window for a subtly wrong check to leak another
- * user's row.
+ * read below filters explicitly via `buildOwnOrAccessibleFilter` (`./permissions.ts`) — "the row
+ * is the caller's own, OR its project is one the caller can read via `project_members`" — same
+ * discipline as `src/app/api/cron/drive-sync/route.ts` had with a plain `.eq("user_id", userId)`
+ * before Team Sharing slice 1b, Phase 14 (design ADR-05). `getTranscription` in particular
+ * filters by `id` AND that ownership-or-access clause together in the SAME query — never
+ * fetch-by-id-then-check-owner in application code, which would leave a window for a subtly wrong
+ * check to leak another user's row.
+ *
+ * A transcription with `project_id IS NULL` is private by construction (same rule as the RLS
+ * policy `transcriptions: read`, `20260728160000_rls_projects_transcriptions.sql`) — it is never
+ * reachable through the accessible-projects branch, only through `user_id.eq`.
  *
  * `audio_url` (or any signed/storage URL) is NEVER selected or returned by any tool here — MCP
  * exposes text + metadata only, by design (see the phase 1 task/changelog).
@@ -34,6 +40,7 @@ import * as Sentry from "@sentry/nextjs";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { buildOwnOrAccessibleFilter, getAccessibleProjectIds } from "./permissions";
 
 export const DEFAULT_LIST_LIMIT = 20;
 export const MAX_LIST_LIMIT = 50;
@@ -169,14 +176,24 @@ export function buildExcerpt(text: string, query: string, maxLength = 160): stri
 }
 
 /**
- * Fetches `{id -> name}` for the CALLER'S OWN projects only (`.eq("user_id", userId)`). Shared by
- * all three tools below instead of a per-tool query — one place to audit, and it means a
+ * Fetches `{id -> name}` for the caller's own projects PLUS any project shared with them
+ * (`accessibleProjectIds`, resolved by the caller via `getAccessibleProjectIds`). Shared by all
+ * three tools below instead of a per-tool query — one place to audit, and it means a
  * `project_id` that (however it happened — data drift, a future bug elsewhere) points at a
- * different user's project row simply fails to resolve a name instead of leaking it, because
- * that project id is never present in THIS map.
+ * project the caller can neither own nor read simply fails to resolve a name instead of leaking
+ * it, because that project id is never present in THIS map. `idColumn: "id"` because on the
+ * `projects` table itself the accessible id IS the row's own id, unlike `transcriptions` where
+ * it lives in a separate `project_id` column.
  */
-async function fetchProjectNameMap(supabase: SupabaseClient, userId: string): Promise<Map<string, string>> {
-  const { data } = await supabase.from("projects").select("id, name").eq("user_id", userId);
+async function fetchProjectNameMap(
+  supabase: SupabaseClient,
+  userId: string,
+  accessibleProjectIds: readonly string[]
+): Promise<Map<string, string>> {
+  const { data } = await supabase
+    .from("projects")
+    .select("id, name")
+    .or(buildOwnOrAccessibleFilter(userId, accessibleProjectIds, "id"));
   const rows = (data ?? []) as Array<{ id: string; name: string }>;
   return new Map(rows.map((p) => [p.id, p.name]));
 }
@@ -188,9 +205,15 @@ export type ListTranscriptionsInput = {
 };
 
 /**
- * Lists the caller's own transcriptions (metadata only, never `text`/`audio_url`). `search`, if
- * given, is a lightweight title-only filter (case-insensitive substring) — for matching against
- * the transcription body too, use `searchTranscriptions` instead.
+ * Lists the caller's own transcriptions PLUS those in any project shared with them (Team Sharing
+ * slice 1b, Phase 14 — capability always `'read'`, ADR-05 regla 3). `search`, if given, is a
+ * lightweight title-only filter (case-insensitive substring) — for matching against the
+ * transcription body too, use `searchTranscriptions` instead.
+ *
+ * If `input.projectId` is given, the caller-controlled `.eq("project_id", ...)` narrows on TOP of
+ * the ownership-or-access `.or()` clause (AND, not OR) — a caller cannot widen access by naming a
+ * project id they can't otherwise read: rows matching that project id still need to also satisfy
+ * `user_id.eq` or `project_id.in.(accessible)`, so an inaccessible project simply yields zero rows.
  */
 export async function listTranscriptions(
   supabase: SupabaseClient,
@@ -199,10 +222,12 @@ export async function listTranscriptions(
 ): Promise<CallToolResult> {
   if (!userId) return unauthorizedResult();
 
+  const accessibleProjectIds = await getAccessibleProjectIds(supabase, userId);
+
   let query = supabase
     .from("transcriptions")
     .select(TRANSCRIPTION_LIST_COLUMNS)
-    .eq("user_id", userId)
+    .or(buildOwnOrAccessibleFilter(userId, accessibleProjectIds))
     .is("deleted_at", null);
 
   if (input.projectId) query = query.eq("project_id", input.projectId);
@@ -215,7 +240,7 @@ export async function listTranscriptions(
   const matched = search ? rows.filter((r) => r.title.toLowerCase().includes(search)) : rows;
   const limited = matched.slice(0, clampLimit(input.limit));
 
-  const projectNameById = await fetchProjectNameMap(supabase, userId);
+  const projectNameById = await fetchProjectNameMap(supabase, userId, accessibleProjectIds);
 
   return jsonResult(
     limited.map((row) => ({
@@ -254,11 +279,12 @@ export type GetTranscriptionInput = {
 
 /**
  * Returns the full detail (including `text`) of ONE transcription — the critical IDOR
- * checkpoint. The query filters by `id` AND `user_id` together in the SAME call, plus
+ * checkpoint. The query filters by `id` AND (own-or-accessible) together in the SAME call, plus
  * `deleted_at is null` — never fetch-by-id and check ownership afterwards. A transcription that
- * doesn't exist and one that belongs to another user are INDISTINGUISHABLE from the caller's
- * point of view: both return the same clean "not found" `isError` result, never a thrown error
- * or a stack trace that could hint at which case it was.
+ * doesn't exist, one that belongs to another user with no shared project, and one whose project
+ * was shared with someone else but not the caller are all INDISTINGUISHABLE from the caller's
+ * point of view: all three return the same clean "not found" `isError` result, never a thrown
+ * error or a stack trace that could hint at which case it was.
  */
 export async function getTranscription(
   supabase: SupabaseClient,
@@ -267,11 +293,13 @@ export async function getTranscription(
 ): Promise<CallToolResult> {
   if (!userId || !input.id) return unauthorizedResult();
 
+  const accessibleProjectIds = await getAccessibleProjectIds(supabase, userId);
+
   const { data, error } = await supabase
     .from("transcriptions")
     .select(TRANSCRIPTION_DETAIL_COLUMNS)
     .eq("id", input.id)
-    .eq("user_id", userId)
+    .or(buildOwnOrAccessibleFilter(userId, accessibleProjectIds))
     .is("deleted_at", null)
     .maybeSingle();
 
@@ -285,7 +313,7 @@ export async function getTranscription(
       .from("projects")
       .select("name")
       .eq("id", row.project_id)
-      .eq("user_id", userId)
+      .or(buildOwnOrAccessibleFilter(userId, accessibleProjectIds, "id"))
       .maybeSingle();
     project = (projectRow as { name: string } | null)?.name ?? null;
   }
@@ -311,9 +339,10 @@ export type SearchTranscriptionsInput = {
 };
 
 /**
- * Full(er)-text search across the caller's own transcriptions: `title`, `text`, and
- * `description`, case-insensitive substring match. Returns a small excerpt per result, never the
- * full `text` — follow up with `getTranscription` for the complete content.
+ * Full(er)-text search across the caller's own transcriptions PLUS those in any project shared
+ * with them: `title`, `text`, and `description`, case-insensitive substring match. Returns a
+ * small excerpt per result, never the full `text` — follow up with `getTranscription` for the
+ * complete content.
  */
 export async function searchTranscriptions(
   supabase: SupabaseClient,
@@ -326,10 +355,12 @@ export async function searchTranscriptions(
   if (!query) return jsonResult([]);
   const lowerQuery = query.toLowerCase();
 
+  const accessibleProjectIds = await getAccessibleProjectIds(supabase, userId);
+
   const { data, error } = await supabase
     .from("transcriptions")
     .select(TRANSCRIPTION_SEARCH_COLUMNS)
-    .eq("user_id", userId)
+    .or(buildOwnOrAccessibleFilter(userId, accessibleProjectIds))
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(SEARCH_FETCH_CAP);
@@ -345,7 +376,7 @@ export async function searchTranscriptions(
   );
   const limited = matched.slice(0, clampLimit(input.limit));
 
-  const projectNameById = await fetchProjectNameMap(supabase, userId);
+  const projectNameById = await fetchProjectNameMap(supabase, userId, accessibleProjectIds);
 
   return jsonResult(
     limited.map((row) => ({
