@@ -13,81 +13,92 @@
 --  explicit transaction that always ROLLBACKs, so nothing it touches is persisted.
 -- ============================================================
 
--- ---------- 1. Objects exist ----------
-select 'columns' as check_group,
-       case when count(*) = 3 then 'PASS' else 'FAIL' end as result,
-       count(*) || '/3 found (projects.root_project_id, ai_usage_log.project_id, project_invites.status)' as detail
-from information_schema.columns
-where (table_name = 'projects'      and column_name = 'root_project_id')
-   or (table_name = 'ai_usage_log'  and column_name = 'project_id')
-   or (table_name = 'project_invites' and column_name = 'status');
+-- ---------- 1-3. Every static check, as ONE result set ----------
+-- Deliberately a single UNION ALL rather than separate statements: the Supabase SQL Editor only
+-- renders the LAST select of a script, so eight separate queries would silently show one result
+-- and hide seven. Read every row — `ord` keeps them in a stable order.
+select * from (
+  select 1 as ord, 'columns' as check_group,
+         case when count(*) = 3 then 'PASS' else 'FAIL' end as result,
+         count(*) || '/3 (projects.root_project_id, ai_usage_log.project_id, project_invites.status)' as detail
+  from information_schema.columns
+  where (table_name = 'projects'        and column_name = 'root_project_id')
+     or (table_name = 'ai_usage_log'    and column_name = 'project_id')
+     or (table_name = 'project_invites' and column_name = 'status')
 
-select 'tables' as check_group,
-       case when count(*) = 2 then 'PASS' else 'FAIL' end as result,
-       count(*) || '/2 found (project_members, project_invites)' as detail
-from information_schema.tables
-where table_schema = 'public' and table_name in ('project_members', 'project_invites');
+  union all
+  select 2, 'tables',
+         case when count(*) = 2 then 'PASS' else 'FAIL' end,
+         count(*) || '/2 (project_members, project_invites)'
+  from information_schema.tables
+  where table_schema = 'public' and table_name in ('project_members', 'project_invites')
 
-select 'kernel functions' as check_group,
-       case when count(*) = 5 then 'PASS' else 'FAIL' end as result,
-       count(*) || '/5 found: ' || string_agg(proname, ', ' order by proname) as detail
-from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-where n.nspname = 'public'
-  and proname in ('project_role_at_root', 'role_has_capability', 'has_root_access',
-                  'has_project_access', 'accessible_project_ids');
+  union all
+  select 3, 'kernel functions',
+         case when count(*) = 5 then 'PASS' else 'FAIL' end,
+         count(*) || '/5: ' || coalesce(string_agg(proname, ', ' order by proname), 'none')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and proname in ('project_role_at_root', 'role_has_capability', 'has_root_access',
+                    'has_project_access', 'accessible_project_ids')
 
-select 'triggers' as check_group,
-       case when count(*) >= 5 then 'PASS' else 'FAIL' end as result,
-       count(*) || '/5 expected: ' || string_agg(tgname, ', ' order by tgname) as detail
-from pg_trigger
-where not tgisinternal
-  and tgname in ('trg_set_project_root', 'trg_cascade_project_root',
-                 'trg_freeze_project_ownership', 'trg_freeze_transcription_ownership',
-                 'trg_materialize_project_owner');
+  union all
+  select 4, 'triggers',
+         case when count(*) >= 5 then 'PASS' else 'FAIL' end,
+         count(*) || '/5: ' || coalesce(string_agg(tgname, ', ' order by tgname), 'none')
+  from pg_trigger
+  where not tgisinternal
+    and tgname in ('trg_set_project_root', 'trg_cascade_project_root',
+                   'trg_freeze_project_ownership', 'trg_freeze_transcription_ownership',
+                   'trg_materialize_project_owner')
 
-select 'policies' as check_group,
-       case when count(*) >= 9 then 'PASS' else 'FAIL' end as result,
-       count(*) || ' policies on projects/transcriptions/project_members/project_invites' as detail
-from pg_policies
-where schemaname = 'public'
-  and tablename in ('projects', 'transcriptions', 'project_members', 'project_invites');
+  union all
+  select 5, 'policies',
+         case when count(*) >= 9 then 'PASS' else 'FAIL' end,
+         count(*) || ' on projects/transcriptions/project_members/project_invites (expected >= 9)'
+  from pg_policies
+  where schemaname = 'public'
+    and tablename in ('projects', 'transcriptions', 'project_members', 'project_invites')
 
-select 'storage policy' as check_group,
-       case when count(*) >= 1 then 'PASS' else 'FAIL' end as result,
-       count(*) || ' shared-read policy on storage.objects' as detail
-from pg_policies
-where schemaname = 'storage' and tablename = 'objects' and cmd = 'SELECT';
+  union all
+  select 6, 'storage policy',
+         case when count(*) >= 1 then 'PASS' else 'FAIL' end,
+         count(*) || ' SELECT policy on storage.objects'
+  from pg_policies
+  where schemaname = 'storage' and tablename = 'objects' and cmd = 'SELECT'
 
--- ---------- 2. Backfills actually ran ----------
--- These are the ones that hurt if skipped: without them, every owner loses sight of their own
--- projects the moment the new read policy goes live.
-select 'backfill: root_project_id' as check_group,
-       case when count(*) = 0 then 'PASS' else 'FAIL' end as result,
-       count(*) || ' projects with a NULL root (must be 0)' as detail
-from public.projects where root_project_id is null;
+  -- The two backfills below are the ones that hurt most if skipped: without them every owner
+  -- loses sight of their own projects the moment the new read policy goes live.
+  union all
+  select 7, 'backfill: root_project_id',
+         case when count(*) = 0 then 'PASS' else 'FAIL' end,
+         count(*) || ' projects with a NULL root (must be 0)'
+  from public.projects where root_project_id is null
 
-select 'backfill: owner membership' as check_group,
-       case when count(*) = 0 then 'PASS' else 'FAIL' end as result,
-       count(*) || ' projects without an owner row in project_members (must be 0)' as detail
-from public.projects p
-where not exists (
-  select 1 from public.project_members m
-  where m.project_id = p.id and m.user_id = p.user_id and m.role = 'owner'
-);
+  union all
+  select 8, 'backfill: owner membership',
+         case when count(*) = 0 then 'PASS' else 'FAIL' end,
+         count(*) || ' projects with no owner row in project_members (must be 0)'
+  from public.projects p
+  where not exists (
+    select 1 from public.project_members m
+    where m.project_id = p.id and m.user_id = p.user_id and m.role = 'owner'
+  )
 
--- ---------- 3. The capability matrix answers correctly ----------
-select 'capability matrix' as check_group,
-       case when public.role_has_capability('viewer', 'read')    is true
-             and public.role_has_capability('viewer', 'write')   is false
-             and public.role_has_capability('viewer', 'share')   is false
-             and public.role_has_capability('editor', 'write')   is true
-             and public.role_has_capability('editor', 'share')   is false
-             and public.role_has_capability('admin',  'share')   is true
-             and public.role_has_capability('owner',  'delete')  is true
-             and public.role_has_capability(null,     'read')    is false
-             and public.role_has_capability('owner',  'typo')    is false
-       then 'PASS' else 'FAIL' end as result,
-       'viewer reads but cannot write/share; unknown capability and null role both deny' as detail;
+  union all
+  select 9, 'capability matrix',
+         case when public.role_has_capability('viewer', 'read')   is true
+               and public.role_has_capability('viewer', 'write')  is false
+               and public.role_has_capability('viewer', 'share')  is false
+               and public.role_has_capability('editor', 'write')  is true
+               and public.role_has_capability('editor', 'share')  is false
+               and public.role_has_capability('admin',  'share')  is true
+               and public.role_has_capability('owner',  'delete') is true
+               and public.role_has_capability(null,     'read')   is false
+               and public.role_has_capability('owner',  'typo')   is false
+         then 'PASS' else 'FAIL' end,
+         'viewer reads but cannot write/share; unknown capability and null role both deny'
+) checks order by ord;
 
 -- ---------- 4. Write guards actually block (always rolled back) ----------
 -- Everything below happens inside a transaction that is rolled back, so no row is persisted.
