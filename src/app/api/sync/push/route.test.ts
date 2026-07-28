@@ -78,9 +78,10 @@ const PROJECT_LINKS = [
   { id: "leaf2", parent_project_id: null },
 ];
 
-function postPush(body: unknown) {
+function postPush(body: unknown, headers?: Record<string, string>) {
   const req = new Request("http://localhost/api/sync/push", {
     method: "POST",
+    headers,
     body: JSON.stringify(body),
   });
   return POST(req as never);
@@ -214,6 +215,10 @@ describe("POST /api/sync/push — upsert de transcripciones", () => {
     // (nunca creada por Groq), no tocaba ninguna fila y respondía ok sin persistir nada.
     const calls: QueryState[] = [];
     const supabase = createMockSupabase((state) => {
+      // Fila nueva: el lookup de version (ADR-07) no encuentra nada todavía.
+      if (state.table === "transcriptions" && state.mode === "select" && state.columns === "id, version") {
+        return { data: [], error: null };
+      }
       if (state.table === "transcriptions" && state.mode === "upsert") return { data: null, error: null };
       throw new Error(`Query inesperada: ${state.table}/${state.mode}`);
     }, calls);
@@ -238,6 +243,8 @@ describe("POST /api/sync/push — upsert de transcripciones", () => {
     });
     // NUNCA debe caer al update-only (que no crearía la fila 100% local).
     expect(calls.some((c) => c.table === "transcriptions" && c.mode === "update")).toBe(false);
+    // Fila nueva: version arranca en 1 (ADR-07), sin importar base_version.
+    expect(json.results).toContainEqual({ id: "t1", kind: "transcription", status: "ok", version: 1 });
   });
 
   it("sin audio_name (cliente viejo): update-only scopeado por user, no intenta crear", async () => {
@@ -256,5 +263,134 @@ describe("POST /api/sync/push — upsert de transcripciones", () => {
     expect(updateCall).toBeDefined();
     expect(updateCall!.filters.eq).toMatchObject({ id: "t1", user_id: "u1" });
     expect(calls.some((c) => c.mode === "upsert")).toBe(false);
+    // Legacy sin audio_name: fuera del gate de version (comportamiento previo, sin cambios).
+    expect(json.results ?? []).toEqual([]);
+  });
+});
+
+describe("POST /api/sync/push — version y conflicto (ADR-07)", () => {
+  it("proyecto existente con base_version al día: ok, version incrementada en el resultado", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "projects" && state.columns === "id, version") {
+        return { data: [{ id: "p1", version: 5 }], error: null };
+      }
+      if (state.table === "projects" && state.columns === "id, parent_project_id") {
+        return { data: [], error: null };
+      }
+      if (state.table === "projects" && state.mode === "upsert") return { data: null, error: null };
+      throw new Error(`Query inesperada: ${state.table}/${state.mode}/${state.columns}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush(
+      { projects: { upserts: [{ id: "p1", name: "General", base_version: 5 }] } },
+      { "x-client-version": "2.0.0" }
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(json.results).toContainEqual({ id: "p1", kind: "project", status: "ok", version: 6 });
+    expect(calls.some((c) => c.table === "projects" && c.mode === "upsert")).toBe(true);
+  });
+
+  it("proyecto existente con base_version desactualizado: conflict, NO se escribe, gana el servidor", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "projects" && state.columns === "id, version") {
+        return { data: [{ id: "p1", version: 5 }], error: null };
+      }
+      // La jerarquía se resuelve ANTES del chequeo de version por ítem, sin importar si el ítem
+      // termina en conflicto — se mockea igual aunque este test no la ejercite.
+      if (state.table === "projects" && state.columns === "id, parent_project_id") {
+        return { data: [], error: null };
+      }
+      throw new Error(`Query inesperada (no debería escribir): ${state.table}/${state.mode}/${state.columns}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush(
+      { projects: { upserts: [{ id: "p1", name: "General", base_version: 3 }] } },
+      { "x-client-version": "2.0.0" }
+    );
+    const json = await res.json();
+
+    expect(json.results).toContainEqual({ id: "p1", kind: "project", status: "conflict", version: 5 });
+    expect(calls.some((c) => c.mode === "upsert")).toBe(false);
+  });
+
+  it("transcripción existente (con audio_name) con base_version desactualizado: conflict, NO se escribe", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "transcriptions" && state.columns === "id, version") {
+        return { data: [{ id: "t1", version: 2 }], error: null };
+      }
+      throw new Error(`Query inesperada (no debería escribir): ${state.table}/${state.mode}/${state.columns}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush(
+      { transcriptions: { upserts: [{ id: "t1", audio_name: "a.wav", text: "x", base_version: 1 }] } },
+      { "x-client-version": "2.0.0" }
+    );
+    const json = await res.json();
+
+    expect(json.results).toContainEqual({ id: "t1", kind: "transcription", status: "conflict", version: 2 });
+    expect(calls.some((c) => c.mode === "upsert")).toBe(false);
+  });
+
+  it("upsert sobre fila EXISTENTE sin base_version, sin header x-client-version: rechazo temprano, nada se escribe", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "projects" && state.columns === "id, version") {
+        return { data: [{ id: "p1", version: 5 }], error: null };
+      }
+      throw new Error(`Query inesperada (no debería escribir): ${state.table}/${state.mode}/${state.columns}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush({ projects: { upserts: [{ id: "p1", name: "General" }] } });
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("client_too_old");
+    expect(calls.some((c) => c.mode === "upsert" || c.mode === "update")).toBe(false);
+  });
+
+  it("upsert sobre fila EXISTENTE sin base_version, header por debajo del mínimo: mismo rechazo temprano", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "projects" && state.columns === "id, version") {
+        return { data: [{ id: "p1", version: 5 }], error: null };
+      }
+      throw new Error(`Query inesperada (no debería escribir): ${state.table}/${state.mode}/${state.columns}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush(
+      { projects: { upserts: [{ id: "p1", name: "General" }] } },
+      { "x-client-version": "1.0.0" }
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("client_too_old");
+  });
+
+  it("upsert sobre fila NUEVA sin base_version: ok igual, no dispara el gate (fila nueva no tiene con qué entrar en conflicto)", async () => {
+    const calls: QueryState[] = [];
+    const supabase = createMockSupabase((state) => {
+      if (state.table === "projects" && state.columns === "id, version") return { data: [], error: null };
+      if (state.table === "projects" && state.columns === "id, parent_project_id") return { data: [], error: null };
+      if (state.table === "projects" && state.mode === "upsert") return { data: null, error: null };
+      throw new Error(`Query inesperada: ${state.table}/${state.mode}/${state.columns}`);
+    }, calls);
+    vi.mocked(getApiUser).mockResolvedValue({ supabase: supabase as never, user: { id: "u1" } as never });
+
+    const res = await postPush({ projects: { upserts: [{ id: "p-new", name: "Nuevo" }] } });
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(json.results).toContainEqual({ id: "p-new", kind: "project", status: "ok", version: 1 });
   });
 });

@@ -15,8 +15,30 @@ import {
   markSchemaCompatResult,
   shouldRedetectSchemaCompat,
 } from "@/lib/supabase/schema-compat";
+import { isClientVersionAllowed, MIN_SYNC_CLIENT_VERSION, resolvePushOutcome } from "@/lib/sync/pushConflict";
 
 export const runtime = "nodejs";
+
+/** Resultado estructurado por ítem (ADR-07c): reemplaza el matcheo por string de `errors[]` como
+ * canal de decisión. `errors[]` se mantiene solo por compatibilidad de mensajes de UI. */
+type PushResult =
+  | { id: string; kind: "project" | "transcription"; status: "ok"; version: number }
+  | { id: string; kind: "project" | "transcription"; status: "conflict"; version: number }
+  | { id: string; kind: "project" | "transcription"; status: "error"; code: "client_too_old" };
+
+/** Trae `id → version` actual para los ids pedidos (solo filas del usuario). Vacío si `ids` está
+ * vacío: no dispara una query sin sentido (mismo criterio de las demás funciones de este archivo). */
+async function fetchVersionsByIds(
+  supabase: SupabaseClient,
+  table: "projects" | "transcriptions",
+  userId: string,
+  ids: string[]
+): Promise<Map<string, number>> {
+  if (ids.length === 0) return new Map();
+  const { data, error } = await supabase.from(table).select("id, version").eq("user_id", userId).in("id", ids);
+  if (error || !data) return new Map();
+  return new Map((data as { id: string; version: number }[]).map((row) => [row.id, row.version]));
+}
 
 /**
  * Columnas de Drive-sync v2 (doc 10): agregadas por la migración
@@ -135,6 +157,44 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString();
     const errors: string[] = [];
+    const results: PushResult[] = [];
+
+    // ---- Version/conflicto (ADR-07): lookup de version actual + gate de cliente viejo ----
+    // El lookup corre ANTES de tocar nada — ni upserts ni deletes — así el gate de abajo puede
+    // rechazar el request completo sin dejar writes a medias.
+    const projectUpsertIds = (body.projects?.upserts ?? []).map((p) => p.id).filter((id): id is string => !!id);
+    // Solo la rama "upsert real" (con audio_name) entra al gate de version: la rama update-only
+    // (clientes viejos sin audio_name) es un camino legacy explícitamente fuera de este slice —
+    // exigirle base_version rompería el comportamiento documentado "cliente viejo, sin cambios".
+    const transcriptionUpsertIds = (body.transcriptions?.upserts ?? [])
+      .filter((t) => !!t.audio_name)
+      .map((t) => t.id)
+      .filter((id): id is string => !!id);
+
+    const [projectVersions, transcriptionVersions] = await Promise.all([
+      fetchVersionsByIds(supabase, "projects", user.id, projectUpsertIds),
+      fetchVersionsByIds(supabase, "transcriptions", user.id, transcriptionUpsertIds),
+    ]);
+
+    // Backstop de contrato (ADR-07g): un upsert sobre una fila EXISTENTE sin `base_version` solo
+    // puede venir de un cliente que todavía no habla este protocolo. El header es la capa barata
+    // (rechaza temprano, sin tocar la base); el `resolvePushOutcome` de más abajo es la capa fina
+    // (por ítem, cubre el caso raro de un cliente al día que igual omite `base_version` en uno).
+    const hasVersionlessExistingUpsert =
+      (body.projects?.upserts ?? []).some((p) => p.id && projectVersions.has(p.id) && p.base_version == null) ||
+      (body.transcriptions?.upserts ?? []).some(
+        (t) => t.audio_name && t.id && transcriptionVersions.has(t.id) && t.base_version == null
+      );
+
+    if (hasVersionlessExistingUpsert && !isClientVersionAllowed(req.headers.get("x-client-version"), MIN_SYNC_CLIENT_VERSION)) {
+      return NextResponse.json(
+        {
+          error: "Tu versión de la app quedó desactualizada para este cambio; actualizá para seguir sincronizando.",
+          code: "client_too_old",
+        },
+        { status: 400 }
+      );
+    }
 
     // ---- Proyectos: upserts ----
     if ((body.projects?.upserts ?? []).length > 0) {
@@ -162,6 +222,21 @@ export async function POST(req: NextRequest) {
           const parsed = validateProjectName(p.name ?? "");
           if (!p.id || !parsed.ok) {
             errors.push(`Proyecto inválido: ${p.id ?? "(sin id)"}`);
+            continue;
+          }
+
+          // ADR-07: version es el único árbitro de conflictos, nunca el reloj del cliente.
+          const existingVersion = projectVersions.get(p.id) ?? null;
+          const outcome = resolvePushOutcome(existingVersion, p.base_version, existingVersion === null);
+          if (outcome.status === "conflict") {
+            results.push({ id: p.id, kind: "project", status: "conflict", version: outcome.version });
+            continue;
+          }
+          if (outcome.status === "error") {
+            errors.push(
+              `Proyecto ${p.id}: tu versión de la app quedó desactualizada para este cambio; actualizá para seguir sincronizando.`
+            );
+            results.push({ id: p.id, kind: "project", status: "error", code: outcome.code });
             continue;
           }
 
@@ -215,6 +290,15 @@ export async function POST(req: NextRequest) {
             errors.push(`Proyecto ${p.id}: ${error.message}`);
             continue;
           }
+          // `version` resultante: el trigger `touch_updated_at_versioned` suma 1 en cada UPDATE;
+          // una fila nueva arranca en el default de la columna (1). Se deriva en memoria en vez de
+          // pedirle un round-trip extra a Supabase — es determinístico dado lo que ya sabemos.
+          results.push({
+            id: p.id,
+            kind: "project",
+            status: "ok",
+            version: existingVersion === null ? 1 : existingVersion + 1,
+          });
 
           // Reflejamos el resultado en el snapshot en memoria para próximos ítems del mismo push.
           if (resolvedParentId !== undefined) {
@@ -325,6 +409,22 @@ export async function POST(req: NextRequest) {
         if (t.project_id !== undefined) fields.project_id = t.project_id;
 
         if (t.audio_name) {
+          // ADR-07: version es el único árbitro de conflictos, nunca el reloj del cliente. Solo
+          // esta rama (upsert real) entra al gate — ver comentario del lookup más arriba.
+          const existingVersion = transcriptionVersions.get(t.id) ?? null;
+          const outcome = resolvePushOutcome(existingVersion, t.base_version, existingVersion === null);
+          if (outcome.status === "conflict") {
+            results.push({ id: t.id, kind: "transcription", status: "conflict", version: outcome.version });
+            continue;
+          }
+          if (outcome.status === "error") {
+            errors.push(
+              `Transcripción ${t.id}: tu versión de la app quedó desactualizada para este cambio; actualizá para seguir sincronizando.`
+            );
+            results.push({ id: t.id, kind: "transcription", status: "error", code: outcome.code });
+            continue;
+          }
+
           // Upsert real: crea la fila si no existe (transcripción 100% local) o la actualiza si ya
           // existe. `user_id` + `audio_name` son los NOT NULL que el INSERT necesita; RLS (cliente
           // user-scoped de getApiUser, igual que el upsert de proyectos) garantiza que solo se
@@ -332,7 +432,16 @@ export async function POST(req: NextRequest) {
           // vuelve a pushear con el mismo id (el desktop la tiene → debe estar visible).
           const row = { id: t.id, user_id: user.id, audio_name: t.audio_name, deleted_at: null, ...fields };
           const { error } = await supabase.from("transcriptions").upsert(row);
-          if (error) errors.push(`Transcripción ${t.id}: ${error.message}`);
+          if (error) {
+            errors.push(`Transcripción ${t.id}: ${error.message}`);
+          } else {
+            results.push({
+              id: t.id,
+              kind: "transcription",
+              status: "ok",
+              version: existingVersion === null ? 1 : existingVersion + 1,
+            });
+          }
         } else {
           // Cliente viejo (sin audio_name): update-only, no puede crear. Comportamiento previo.
           if (Object.keys(fields).length === 0) continue;
@@ -367,6 +476,7 @@ export async function POST(req: NextRequest) {
       ok: errors.length === 0,
       errors,
       projectDeletions,
+      results,
     });
   } catch (err) {
     // Red de seguridad: cualquier excepción no prevista (ej. throw fuera del manejo
@@ -387,6 +497,9 @@ type PushBody = {
       description?: string;
       /** Ver contrato de jerarquía en el comentario de cabecera del archivo. */
       parent_project_id?: string | null;
+      /** `version` que el cliente leyó la última vez (ADR-07). Ausente en una fila EXISTENTE ⇒
+       *  `results[]` trae `status: "error", code: "client_too_old"` (backstop de contrato). */
+      base_version?: number | null;
     }[];
     deletes?: string[];
     /** Ids de `deletes` que el caller confirma explícitamente que pueden cascadear (tienen
@@ -404,6 +517,9 @@ type PushBody = {
       description?: string;
       icon?: string;
       project_id?: string | null;
+      /** `version` que el cliente leyó la última vez (ADR-07). Solo aplica a la rama con
+       *  `audio_name` (upsert real); el update-only legacy queda fuera del gate a propósito. */
+      base_version?: number | null;
     }[];
     deletes?: string[];
   };
