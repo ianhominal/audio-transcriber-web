@@ -100,20 +100,35 @@ select * from (
          'viewer reads but cannot write/share; unknown capability and null role both deny'
 ) checks order by ord;
 
--- ---------- 4. Write guards actually block (always rolled back) ----------
--- Everything below happens inside a transaction that is rolled back, so no row is persisted.
+-- ============================================================
+--  4. Do the write guards actually BLOCK? (run this block separately)
+--
+--  Section 1 proves the triggers EXIST. This one proves they WORK — a trigger can be installed
+--  and still have a bug inside.
+--
+--  Results come back as a table, NOT as NOTICE messages: the Supabase SQL Editor has no message
+--  pane, only Results and Chart, so anything raised with `raise notice` is invisible.
+--
+--  SAFE: every row it creates is written inside a transaction that is rolled back. The final
+--  SELECT runs before the ROLLBACK, so you still see the results while nothing is persisted.
+--  Select this whole block (from `begin;` to `rollback;`) and run it on its own.
+-- ============================================================
+
 begin;
+
+create temp table _verify_results (ord int, check_group text, result text, detail text) on commit drop;
 
 do $$
 declare
-  v_user   uuid;
-  v_parent uuid;
-  v_child  uuid;
+  v_user    uuid;
+  v_parent  uuid;
+  v_child   uuid;
+  v_actual  uuid;
   v_blocked boolean;
 begin
   select id into v_user from public.profiles limit 1;
   if v_user is null then
-    raise notice 'SKIP: no profiles yet, cannot run write-guard checks';
+    insert into _verify_results values (0, 'setup', 'SKIP', 'no profiles yet — nothing to test against');
     return;
   end if;
 
@@ -121,13 +136,11 @@ begin
   insert into public.projects (user_id, name, parent_project_id)
     values (v_user, '__verify_child__', v_parent) returning id into v_child;
 
-  -- (a) The child inherited the parent's root.
-  if (select root_project_id from public.projects where id = v_child) = v_parent then
-    raise notice 'PASS  inheritance: child resolved its root to the parent';
-  else
-    raise notice 'FAIL  inheritance: child root is %, expected %',
-      (select root_project_id from public.projects where id = v_child), v_parent;
-  end if;
+  -- (a) A subproject inherits its parent's root.
+  select root_project_id into v_actual from public.projects where id = v_child;
+  insert into _verify_results values (1, 'inheritance',
+    case when v_actual = v_parent then 'PASS' else 'FAIL' end,
+    'child root is ' || coalesce(v_actual::text, 'NULL') || ', expected the parent''s id');
 
   -- (b) Ownership cannot be handed to someone else.
   v_blocked := false;
@@ -136,11 +149,10 @@ begin
   exception when others then
     v_blocked := true;
   end;
-  if v_blocked then
-    raise notice 'PASS  ownership: rewriting user_id was rejected';
-  else
-    raise notice 'FAIL  ownership: user_id was rewritten — freeze trigger is NOT active';
-  end if;
+  insert into _verify_results values (2, 'ownership guard',
+    case when v_blocked then 'PASS' else 'FAIL' end,
+    case when v_blocked then 'rewriting user_id was rejected'
+         else 'user_id WAS rewritten — the freeze trigger is not doing its job' end);
 
   -- (c) A project cannot be teleported into an unrelated tree.
   v_blocked := false;
@@ -149,35 +161,28 @@ begin
   exception when others then
     v_blocked := true;
   end;
-  if v_blocked then
-    raise notice 'PASS  tree integrity: arbitrary root_project_id was rejected';
-  else
-    raise notice 'FAIL  tree integrity: root_project_id was rewritten to an unrelated tree';
-  end if;
+  insert into _verify_results values (3, 'tree integrity',
+    case when v_blocked then 'PASS' else 'FAIL' end,
+    case when v_blocked then 'an arbitrary root_project_id was rejected'
+         else 'root_project_id WAS rewritten to an unrelated tree' end);
 
-  -- (d) But legitimate reparenting still works, and cascades. This is the one that would break
-  --     if the ownership guard had been written as a plain freeze instead of a consistency check.
+  -- (d) And yet legitimate reparenting still works. This is the one that would break if the guard
+  --     above had been written as a plain freeze instead of a consistency check.
   update public.projects set parent_project_id = null where id = v_child;
-  if (select root_project_id from public.projects where id = v_child) = v_child then
-    raise notice 'PASS  reparent: detaching the child made it its own root';
-  else
-    raise notice 'FAIL  reparent: child root is %, expected its own id %',
-      (select root_project_id from public.projects where id = v_child), v_child;
-  end if;
+  select root_project_id into v_actual from public.projects where id = v_child;
+  insert into _verify_results values (4, 'reparent still works',
+    case when v_actual = v_child then 'PASS' else 'FAIL' end,
+    'detached child root is ' || coalesce(v_actual::text, 'NULL') || ', expected its own id');
 
-  -- (e) The owner row was materialized for the projects just created.
-  if (select count(*) from public.project_members
-      where project_id in (v_parent, v_child) and role = 'owner') = 2 then
-    raise notice 'PASS  owner materialization: both new projects got an owner row';
-  else
-    raise notice 'FAIL  owner materialization: expected 2 owner rows for the new projects';
-  end if;
+  -- (e) The owner row is materialized on creation.
+  insert into _verify_results
+  select 5, 'owner materialization',
+         case when count(*) = 2 then 'PASS' else 'FAIL' end,
+         count(*) || '/2 owner rows created for the two test projects'
+  from public.project_members
+  where project_id in (v_parent, v_child) and role = 'owner';
 end $$;
 
-rollback;
+select * from _verify_results order by ord;
 
--- ============================================================
---  Read the NOTICE output above for section 4. Anything FAIL means the corresponding migration
---  did not apply — re-run that file by hand in the SQL Editor before deploying the app code that
---  depends on it.
--- ============================================================
+rollback;
