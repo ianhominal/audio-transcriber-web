@@ -25,6 +25,7 @@ import { NewSubfolderButton } from "./new-subfolder-button";
 import { ProjectChatButton } from "./project-chat-button";
 import { ProjectHeader } from "./project-header";
 import { ProjectTree } from "./project-tree";
+import { ShareProjectButton } from "./share-project-button";
 import { OnboardingWelcome } from "@/components/app/onboarding-welcome";
 import { ResurfaceCard } from "./resurface-card";
 import { SearchBar } from "./search-bar";
@@ -410,6 +411,7 @@ export default async function Dashboard({
                 projectName={activeProject.name}
                 mergeCandidates={mergeCandidates}
               />
+              {user?.id && <ShareProjectButton projectId={activeProject.id} currentUserId={user.id} />}
             </div>
 
             {subfolders.length === 0 && items.length === 0 ? (

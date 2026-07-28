@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { listReceivedInvites } from "@/lib/invites/store";
 import { ToastProvider } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
 import { buttonClasses } from "@/components/ui/Button";
 import { InstallPrompt } from "@/components/install-prompt";
 import LogoutButton from "./logout-button";
+import { ReceivedInvitesButton } from "./received-invites-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -14,6 +16,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
+
+  // Solo el conteo inicial (badge sin parpadeo al cargar el header) — el detalle completo
+  // (nombre del proyecto, rol) se pide recién al abrir el modal (`ReceivedInvitesButton`).
+  const receivedInvites = await listReceivedInvites(supabase, user.id);
 
   return (
     <ToastProvider>
@@ -53,6 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               >
                 Ajustes
               </Link>
+              <ReceivedInvitesButton initialCount={receivedInvites.length} />
               <span className="hidden truncate text-sm text-tertiary md:inline md:max-w-[12rem]" title={user.email}>
                 {user.email}
               </span>

@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/lib/supabase/api", () => ({ getApiUser: vi.fn() }));
 vi.mock("@/lib/supabase/serviceRole", () => ({ createServiceRoleClient: vi.fn() }));
-vi.mock("@/lib/members/store", () => ({ listProjectMembers: vi.fn() }));
+vi.mock("@/lib/members/store", () => ({ listProjectMembers: vi.fn(), attachMemberEmails: vi.fn() }));
 vi.mock("@/lib/invites/store", () => ({ resolveUserIdByEmail: vi.fn(), createInvite: vi.fn() }));
 
 import { getApiUser } from "@/lib/supabase/api";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
-import { listProjectMembers } from "@/lib/members/store";
+import { listProjectMembers, attachMemberEmails } from "@/lib/members/store";
 import { resolveUserIdByEmail, createInvite } from "@/lib/invites/store";
 import { GET, POST } from "./route";
 
@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.mocked(getApiUser).mockReset();
   vi.mocked(createServiceRoleClient).mockReset();
   vi.mocked(listProjectMembers).mockReset();
+  vi.mocked(attachMemberEmails).mockReset();
   vi.mocked(resolveUserIdByEmail).mockReset();
   vi.mocked(createInvite).mockReset();
 });
@@ -49,15 +50,19 @@ describe("GET /api/projects/[id]/members", () => {
     expect(res.status).toBe(401);
   });
 
-  it("200 with the member list (RLS is the only filter, no capability re-check)", async () => {
+  it("200 with the member list, each row carrying its email (RLS is the only capability filter)", async () => {
     mockSession("u1");
     vi.mocked(listProjectMembers).mockResolvedValue([
       { project_id: "p1", user_id: "u1", role: "owner", granted_by: "u1", created_at: "now" },
+    ]);
+    vi.mocked(attachMemberEmails).mockResolvedValue([
+      { project_id: "p1", user_id: "u1", role: "owner", granted_by: "u1", created_at: "now", email: "u1@example.com" },
     ]);
     const res = await getReq();
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.members).toHaveLength(1);
+    expect(body.members[0].email).toBe("u1@example.com");
   });
 });
 

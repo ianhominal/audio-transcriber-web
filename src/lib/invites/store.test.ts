@@ -4,6 +4,8 @@ import {
   createInvite,
   listSentInvites,
   listReceivedInvites,
+  attachProjectNames,
+  attachInviteeEmails,
   acceptInvite,
   rejectInvite,
   cancelInvite,
@@ -126,6 +128,104 @@ describe("listSentInvites / listReceivedInvites", () => {
   it("degrades to an empty list instead of 500 when the table is missing", async () => {
     expect(await listSentInvites(fakeInvitesListClient({ data: null, error: MISSING_TABLE_ERROR }) as never, "p1")).toEqual([]);
     expect(await listReceivedInvites(fakeInvitesListClient({ data: null, error: MISSING_TABLE_ERROR }) as never, "u1")).toEqual([]);
+  });
+});
+
+// ---------- attachProjectNames ----------
+
+function fakeProjectsInClient(result: { data?: unknown; error?: unknown }) {
+  return {
+    from(table: string) {
+      if (table !== "projects") throw new Error(`unexpected table: ${table}`);
+      return {
+        select: () => ({
+          in: () => Promise.resolve(result),
+        }),
+      };
+    },
+  };
+}
+
+const invite = (id: string, projectId: string) =>
+  ({ id, project_id: projectId, invited_user_id: "u2", role: "viewer", invited_by: "u1", status: "pending", created_at: "now", resolved_at: null }) as const;
+
+describe("attachProjectNames", () => {
+  it("returns [] without querying when there are no invites", async () => {
+    const result = await attachProjectNames(fakeProjectsInClient({ data: [], error: null }) as never, []);
+    expect(result).toEqual([]);
+  });
+
+  it("attaches the matching project name to each invite", async () => {
+    const invites = [invite("inv1", "p1"), invite("inv2", "p2")];
+    const result = await attachProjectNames(
+      fakeProjectsInClient({
+        data: [
+          { id: "p1", name: "Proyecto A" },
+          { id: "p2", name: "Proyecto B" },
+        ],
+        error: null,
+      }) as never,
+      invites
+    );
+    expect(result).toEqual([
+      { ...invites[0], project_name: "Proyecto A" },
+      { ...invites[1], project_name: "Proyecto B" },
+    ]);
+  });
+
+  it("falls back to null for a project id with no match", async () => {
+    const invites = [invite("inv1", "p1")];
+    const result = await attachProjectNames(fakeProjectsInClient({ data: [], error: null }) as never, invites);
+    expect(result).toEqual([{ ...invites[0], project_name: null }]);
+  });
+
+  it("degrades to null names on a DB error, never throws", async () => {
+    const invites = [invite("inv1", "p1")];
+    const result = await attachProjectNames(
+      fakeProjectsInClient({ data: null, error: { message: "connection failure" } }) as never,
+      invites
+    );
+    expect(result).toEqual([{ ...invites[0], project_name: null }]);
+  });
+});
+
+// ---------- attachInviteeEmails ----------
+
+function fakeProfilesInClient(result: { data?: unknown; error?: unknown }) {
+  return {
+    from(table: string) {
+      if (table !== "profiles") throw new Error(`unexpected table: ${table}`);
+      return {
+        select: () => ({
+          in: () => Promise.resolve(result),
+        }),
+      };
+    },
+  };
+}
+
+describe("attachInviteeEmails", () => {
+  it("returns [] without querying when there are no invites", async () => {
+    const result = await attachInviteeEmails(fakeProfilesInClient({ data: [], error: null }) as never, []);
+    expect(result).toEqual([]);
+  });
+
+  it("attaches the invitee's email by invited_user_id", async () => {
+    const invites = [invite("inv1", "p1")]; // invited_user_id: "u2"
+    const result = await attachInviteeEmails(
+      fakeProfilesInClient({ data: [{ id: "u2", email: "u2@example.com" }], error: null }) as never,
+      invites
+    );
+    expect(result).toEqual([{ ...invites[0], invitee_email: "u2@example.com" }]);
+  });
+
+  it("degrades to null emails on a DB error, never throws", async () => {
+    const invites = [invite("inv1", "p1")];
+    const result = await attachInviteeEmails(
+      fakeProfilesInClient({ data: null, error: { message: "connection failure" } }) as never,
+      invites
+    );
+    expect(result).toEqual([{ ...invites[0], invitee_email: null }]);
   });
 });
 

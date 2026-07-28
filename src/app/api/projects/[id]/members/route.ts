@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiUser } from "@/lib/supabase/api";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
-import { listProjectMembers } from "@/lib/members/store";
+import { listProjectMembers, attachMemberEmails } from "@/lib/members/store";
 import { resolveUserIdByEmail, createInvite } from "@/lib/invites/store";
 import { isValidInviteRole, sanitizeEmail } from "@/lib/invites/validate";
 
@@ -28,14 +28,18 @@ function isMissingFunctionError(error: unknown): boolean {
 }
 
 /** `GET /api/projects/[id]/members` — capability `read`. Lecture-only: no explicit capability
- * check here, RLS is the single source of truth for reads (I-8). */
+ * check here, RLS is the single source of truth for reads (I-8). Each member travels with
+ * `email` (`attachMemberEmails`, service-role): `profiles` RLS only exposes a session's OWN row,
+ * so without this the "quién es" column of the members UI would show nothing but raw `user_id`s
+ * for everyone except the caller. */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await params;
   const { supabase, user } = await getApiUser(req);
   if (!user) return NextResponse.json({ error: "Necesitás iniciar sesión." }, { status: 401 });
 
   const members = await listProjectMembers(supabase, projectId);
-  return NextResponse.json({ members });
+  const membersWithEmail = await attachMemberEmails(createServiceRoleClient(), members);
+  return NextResponse.json({ members: membersWithEmail });
 }
 
 /**

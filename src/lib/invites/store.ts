@@ -205,6 +205,67 @@ export async function rejectInvite(
   return { ok: true };
 }
 
+export type ProjectInviteWithProjectName = ProjectInvite & { project_name: string | null };
+
+/**
+ * Resolves `project_name` for a list of invites via the SERVICE-ROLE client. This is required —
+ * not just convenient — for the RECEIVED-invites view (Team Sharing UI batch, "GET /api/invites
+ * debe devolver el nombre del proyecto"): a pending invitee has no `project_members` row yet
+ * (that only gets created on accept), so `projects: read` RLS (`has_root_access`) denies a
+ * session-scoped read of the project row, and the desktop/web UI would show a raw UUID instead of
+ * a name. The `project_invites` row itself is the authorization check here — whoever can already
+ * see it (RLS on `project_invites`) legitimately knows the project id; this only resolves
+ * id → name for display, same narrow "service-role for one lookup, RLS everywhere else" pattern as
+ * `resolveUserIdByEmail`. Degrades to `project_name: null` per row on any DB error instead of
+ * failing the whole list.
+ */
+export async function attachProjectNames(
+  serviceClient: SupabaseClient,
+  invites: ProjectInvite[]
+): Promise<ProjectInviteWithProjectName[]> {
+  if (invites.length === 0) return [];
+
+  const projectIds = [...new Set(invites.map((i) => i.project_id))];
+  const { data, error } = await serviceClient.from("projects").select("id, name").in("id", projectIds);
+
+  if (error) {
+    console.error("[invites] attachProjectNames failed", { error: error.message });
+    Sentry.captureException(error, { extra: { stage: "attach-project-names" } });
+    return invites.map((i) => ({ ...i, project_name: null }));
+  }
+
+  const nameById = new Map(((data ?? []) as { id: string; name: string }[]).map((p) => [p.id, p.name]));
+  return invites.map((i) => ({ ...i, project_name: nameById.get(i.project_id) ?? null }));
+}
+
+export type ProjectInviteWithInviteeEmail = ProjectInvite & { invitee_email: string | null };
+
+/**
+ * Resolves `invitee_email` for a list of invites via the SERVICE-ROLE client — same rationale and
+ * pattern as `attachProjectNames` above and `attachMemberEmails` in `@/lib/members/store`:
+ * `profiles` RLS only exposes a session's OWN row, so the "invitaciones pendientes enviadas" view
+ * (the inviter looking at THEIR OWN sent invites) would otherwise have no way to show WHO was
+ * invited, only the invite's own metadata. Degrades to `invitee_email: null` on any DB error.
+ */
+export async function attachInviteeEmails(
+  serviceClient: SupabaseClient,
+  invites: ProjectInvite[]
+): Promise<ProjectInviteWithInviteeEmail[]> {
+  if (invites.length === 0) return [];
+
+  const userIds = [...new Set(invites.map((i) => i.invited_user_id))];
+  const { data, error } = await serviceClient.from("profiles").select("id, email").in("id", userIds);
+
+  if (error) {
+    console.error("[invites] attachInviteeEmails failed", { error: error.message });
+    Sentry.captureException(error, { extra: { stage: "attach-invitee-emails" } });
+    return invites.map((i) => ({ ...i, invitee_email: null }));
+  }
+
+  const emailById = new Map(((data ?? []) as { id: string; email: string }[]).map((p) => [p.id, p.email]));
+  return invites.map((i) => ({ ...i, invitee_email: emailById.get(i.invited_user_id) ?? null }));
+}
+
 /**
  * Cancels a pending invite by DELETING the row — `project_invites.status` has no fourth
  * "cancelled" value (spec only defines `pending → accepted | rejected`), and deleting also frees
