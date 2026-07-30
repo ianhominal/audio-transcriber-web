@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import * as Sentry from "@sentry/nextjs";
+import { exportAudioToDriveBestEffort } from "@/lib/drive/audio-export.server";
 import { randomUUID } from "crypto";
 import { getApiUser } from "@/lib/supabase/api";
 import {
@@ -786,6 +787,27 @@ export async function POST(req: NextRequest) {
     // No bloqueamos la respuesta por un error de guardado, pero lo dejamos visible.
     console.error("[transcribe] transcription insert threw", err);
     Sentry.captureException(err, { extra: { userId: user.id, stage: "transcription-insert" } });
+  }
+
+  // Subir el audio a la carpeta de Drive del proyecto, si cuelga de una conectada. Va en `after()`:
+  // corre DESPUÉS de mandar la respuesta, así la usuaria no espera la subida a Drive para ver su
+  // transcripción, y una falla de Drive no puede romper ni demorar algo que ya salió bien.
+  //
+  // Requisito explícito del dueño: una carpeta de Drive conectada sincroniza en los DOS sentidos,
+  // audios Y transcripciones. Importar ya traía las grabaciones de Drive; esto cierra la vuelta.
+  if (savedId && audioPath) {
+    after(
+      exportAudioToDriveBestEffort({
+        supabase,
+        userId: user.id,
+        transcriptionId: savedId,
+        projectId,
+        storagePath: audioPath,
+        audioName,
+        // Recién creada: si el audio hubiera venido DE Drive, esta fila no se estaría creando acá.
+        driveAudioFileId: null,
+      })
+    );
   }
 
   // `title`/`tags` viajan en la respuesta (mismos valores que se acaban de guardar en la fila, paso

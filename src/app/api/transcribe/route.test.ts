@@ -19,6 +19,15 @@ vi.mock("@ai-sdk/groq", () => ({
   groq: vi.fn(() => ({ __fakeGroqModel: true })),
 }));
 
+// `after` (Next) solo funciona DENTRO del scope de un request real; estos tests invocan el handler
+// directo, así que sin este mock tira "after was called outside a request scope". El trabajo que se
+// difiere con `after` en esta route es la subida del audio a Drive, que es best-effort y ajena a lo
+// que verifican estos tests — se descarta a propósito en vez de ejecutarse.
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return { ...actual, after: vi.fn() };
+});
+
 import { getApiUser } from "@/lib/supabase/api";
 import { generateText } from "ai";
 import { POST } from "./route";

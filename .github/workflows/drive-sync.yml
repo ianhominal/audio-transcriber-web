@@ -1,0 +1,56 @@
+name: Drive sync
+
+# El motor de sync de Drive (/api/cron/drive-sync) vive en Vercel, pero el plan Hobby limita los
+# cron jobs a UNA corrida por día — muy poco para que una carpeta conectada se sienta sincronizada.
+# `vercel.json` agenda igual esa corrida diaria como red de seguridad, y este workflow es el que hace
+# el trabajo de verdad: pega al mismo endpoint cada 15 minutos, gratis, desde GitHub Actions.
+#
+# Requiere un secret del repositorio llamado CRON_SECRET con el MISMO valor que la variable de
+# entorno CRON_SECRET en Vercel (Settings → Secrets and variables → Actions → New repository secret).
+# Sin ese secret el endpoint responde 401 y el workflow falla ruidosamente, que es lo que se quiere:
+# un sync que dejó de correr tiene que notarse.
+
+on:
+  schedule:
+    # Cada 15 minutos. GitHub no garantiza el minuto exacto (puede atrasarse con carga alta), pero
+    # para un sync de archivos esa precisión no hace falta.
+    - cron: "*/15 * * * *"
+  # Permite dispararlo a mano desde la pestaña Actions para probar sin esperar al próximo tick.
+  workflow_dispatch:
+
+# Si un tick todavía está corriendo cuando entra el siguiente, se descarta el nuevo en vez de
+# solapar dos sincronizaciones sobre los mismos archivos.
+concurrency:
+  group: drive-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Drive sync
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://audio-transcriber-web-kappa.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "Falta el secret CRON_SECRET en el repositorio."
+            exit 1
+          fi
+
+          # El secret va en el header Authorization, nunca en la URL: un secreto en el query string
+          # queda en los logs de acceso del server y en cualquier proxy del camino.
+          status=$(curl --silent --show-error --location \
+            --max-time 300 \
+            --output response.txt \
+            --write-out "%{http_code}" \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/drive-sync")
+
+          echo "HTTP $status"
+          cat response.txt
+
+          if [ "$status" != "200" ]; then
+            echo "El sync de Drive falló."
+            exit 1
+          fi

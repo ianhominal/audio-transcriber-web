@@ -357,6 +357,49 @@ export async function uploadFile(
   return res.json();
 }
 
+/**
+ * `files.create` de un archivo BINARIO (un audio) dentro de `folderId`.
+ *
+ * Separada de `uploadFile` porque el multipart de aquella se arma concatenando STRINGS
+ * (`buildMultipartBody`), y meter bytes de audio en un string los corrompe: cualquier secuencia que
+ * no sea UTF-8 válido se reemplaza por U+FFFD y el archivo llega roto a Drive. Acá el cuerpo se
+ * ensambla con `Buffer.concat`, así los bytes viajan intactos.
+ */
+export async function uploadBinaryFile(
+  accessToken: string,
+  folderId: string,
+  name: string,
+  mimeType: string,
+  content: Buffer
+): Promise<DriveFileResult> {
+  const boundary = generateBoundary();
+  const metadata = JSON.stringify({ name, mimeType, parents: [folderId] });
+
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\n` +
+        `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+        `${metadata}\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Type: ${mimeType}\r\n\r\n`,
+      "utf8"
+    ),
+    content,
+    Buffer.from(`\r\n--${boundary}--`, "utf8"),
+  ]);
+
+  const res = await driveFetch(
+    `${DRIVE_UPLOAD_URL}?uploadType=multipart&supportsAllDrives=true&fields=${FILE_FIELDS}`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body: new Uint8Array(body),
+    }
+  );
+  return res.json();
+}
+
 /** `files.update` con contenido (multipart): reemplaza el contenido de un archivo existente. */
 export async function updateFile(
   accessToken: string,
