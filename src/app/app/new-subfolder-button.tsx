@@ -30,7 +30,9 @@ export function NewSubfolderButton({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [icon, setIcon] = useState("📁");
+  // Sin emoji por defecto — ver el comentario de `new-project-button.tsx`: unifica con las carpetas
+  // que crea el desktop, que no manda `icon`.
+  const [icon, setIcon] = useState("");
   const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -38,7 +40,7 @@ export function NewSubfolderButton({
   function reset() {
     setName("");
     setDescription("");
-    setIcon("📁");
+    setIcon("");
     setColor(null);
     setError(null);
   }

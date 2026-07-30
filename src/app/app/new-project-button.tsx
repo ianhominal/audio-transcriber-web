@@ -11,7 +11,11 @@ import { Icon } from "@/components/ui/icon";
 /** Botón + formulario inline para crear un proyecto. */
 export function NewProjectButton() {
   const [open, setOpen] = useState(false);
-  const [icon, setIcon] = useState("📁");
+  // Sin emoji por defecto: un proyecto sin icono se dibuja con el `Icon name="folder"` del sistema
+  // de diseño, igual que los que crea el desktop (que no manda `icon`). Forzar "📁" acá era la razón
+  // por la que un mismo usuario veía carpetas distintas según DÓNDE hubiera creado cada proyecto.
+  // El emoji sigue disponible como personalización explícita vía el picker.
+  const [icon, setIcon] = useState("");
   const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -30,7 +34,7 @@ export function NewProjectButton() {
     }
     setError(null);
     setOpen(false);
-    setIcon("📁");
+    setIcon("");
     setColor(null);
     formRef.current?.reset();
     toast("Proyecto creado.", "success");

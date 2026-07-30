@@ -104,7 +104,8 @@ export function TranscriptionRow({
     setNewProjectPending(true);
     const fd = new FormData();
     fd.set("name", newProjectName);
-    fd.set("icon", "📁");
+    // Sin emoji — ver `new-project-button.tsx`: unifica con los proyectos creados desde el desktop.
+    fd.set("icon", "");
     const res = await createProject(fd);
     if (res.ok) {
       await assignTranscriptionToProject(transcription.id, res.id);

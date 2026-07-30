@@ -83,7 +83,8 @@ export function TranscribeWorkspace({
   const { show: toast } = useToast();
   const [destino, setDestino] = useState<string>(initialProject); // "" | projectId | "__new__"
   const [newName, setNewName] = useState("");
-  const [newIcon, setNewIcon] = useState("📁");
+  // Sin emoji por defecto — ver `new-project-button.tsx`: unifica con los proyectos del desktop.
+  const [newIcon, setNewIcon] = useState("");
 
   // Defaults persistentes de transcripción (Motor/Calidad/Idioma, ver ROADMAP.md ítem F1) +
   // override puntual: `useOverridableDefault` da, por campo, el valor efectivo (override si el
@@ -364,7 +365,7 @@ export function TranscribeWorkspace({
       // más abajo el proyecto nuevo ya aparece en `projects` y el <select> lo resuelve normal.
       setDestino(res.id);
       setNewName("");
-      setNewIcon("📁");
+      setNewIcon("");
     } else if (destino) {
       projectId = destino;
     }

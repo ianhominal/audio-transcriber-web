@@ -1,18 +1,46 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 
+/**
+ * `useSearchParams` obliga a un límite de Suspense (Next lo exige para poder prerenderizar el resto
+ * de la página): por eso el formulario vive en su propio componente y esto solo lo envuelve.
+ */
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+/**
+ * Mensajes de error que puede mandar el callback de OAuth por query string. `auth/callback` redirige
+ * acá con `?error=oauth` cuando `exchangeCodeForSession` falla — hasta ahora esta página IGNORABA ese
+ * parámetro, así que un login de Google que fallaba de verdad devolvía a la persona al formulario
+ * SIN ninguna explicación: no sabía si había fallado, si tenía que reintentar, o si había hecho algo
+ * mal.
+ */
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  oauth: "No pudimos completar el inicio de sesión con Google. Probá de nuevo.",
+};
+
+function LoginForm() {
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  // El error del callback es el valor INICIAL del estado, no un efecto: apenas la persona vuelve a
+  // intentar, `submit`/`google` lo limpian solos y no queda un mensaje viejo pegado en pantalla.
+  const [error, setError] = useState(
+    () => OAUTH_ERROR_MESSAGES[searchParams.get("error") ?? ""] ?? ""
+  );
   const [info, setInfo] = useState("");
 
   const submit = async () => {
