@@ -23,5 +23,15 @@ export function extensionForMimeType(mimeType: string): string {
   return mimeType.includes("ogg") ? "ogg" : "webm";
 }
 
-/** Vercel's request payload limit (~4.5 MB) — larger recordings are routed to the desktop app instead. */
-export const WEB_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
+/**
+ * Largest audio we dare POST to `/api/transcribe`. Larger recordings are kept on-device and routed
+ * to the desktop app instead (see `src/lib/recordings/`).
+ *
+ * Vercel's request body ceiling is 4.5 MB DECIMAL (4_500_000), not 4.5 MiB. This used to be
+ * `4.5 * 1024 * 1024` = 4_718_592, so a recording in that ~218 KB gap passed our own check and was
+ * then rejected by the platform edge in plain text ("Request Entity Too Large") — the request never
+ * reached the handler, so the server-side audio rescue never ran either. On top of that, the
+ * multipart envelope (boundaries, per-field headers, the filename) adds its own bytes on the wire,
+ * so the ceiling has to sit BELOW the platform limit, not exactly on it.
+ */
+export const WEB_MAX_BYTES = 4_400_000;

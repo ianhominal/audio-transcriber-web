@@ -14,6 +14,10 @@ import {
   resolveQueueTitle,
 } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
+import { saveRecording, updateRecording } from "@/lib/recordings/db";
+import { postRecording } from "@/lib/recordings/upload";
+import { recordUploadOutcome } from "@/lib/recordings/flow";
+import type { LocalRecordingSource } from "@/lib/recordings/types";
 import { FILE_ACCEPT } from "@/lib/transcribe/accept";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -60,6 +64,10 @@ type Item = {
   // Tags de tema auto-generados (mismo paso 2.7, best-effort). Ausente/vacío si el paso no corrió o
   // no encontró tags — nunca bloquea el render de la cola (ver chips condicionales en el JSX).
   tags?: string[];
+  // Id en la biblioteca del dispositivo (ver `src/lib/recordings/`). Solo lo tienen las GRABACIONES
+  // (mic/reunión): un archivo subido a mano ya vive en el disco del usuario, no hace falta copiarlo.
+  // Sirve para reflejar en la biblioteca si la subida salió bien, falló o no entró por tamaño.
+  localId?: string;
 };
 
 let counter = 0;
@@ -150,10 +158,29 @@ export function TranscribeWorkspace({
   // desde el detalle de la transcripción. Antes existía un modal "Guardar grabación" que volvía a
   // preguntar el proyecto (redundante) y descartaba la grabación si se cerraba con click afuera/
   // Escape (pérdida de datos) — se eliminó.
-  function enqueueRecording(file: File) {
+  //
+  // Antes de encolar, la grabación se ESCRIBE en el dispositivo (ver `src/lib/recordings/`): una
+  // cola en memoria se pierde entera con un F5 o si el sistema descarta la pestaña, y una
+  // grabación no se puede volver a hacer. Los archivos SUBIDOS a mano no pasan por acá a
+  // propósito: el usuario ya los tiene en su disco.
+  function enqueueRecording(file: File, source: LocalRecordingSource, durationSec: number) {
     const title = defaultTitleFromFileName(file.name);
-    setItems((prev) => [...prev, { key: nextKey(), file, status: "pending" as Status, title }]);
+    const key = nextKey();
+    setItems((prev) => [...prev, { key, file, status: "pending" as Status, title }]);
     toast(`"${title}" agregada a la cola.`, "success");
+
+    // La escritura es asíncrona pero el ítem ya está encolado: si falla, la transcripción sigue su
+    // curso (sería peor bloquearla) y solo se pierde la copia local, que es lo que se avisa.
+    void saveRecording({ blob: file, fileName: file.name, title, mimeType: file.type, durationSec, source })
+      // `setItems` directo (y no `patch`, declarado más abajo): usar el helper acá lo leería antes
+      // de su declaración, y el lint marca eso como acceso a un valor que puede quedar viejo.
+      .then((saved) => setItems((prev) => prev.map((i) => (i.key === key ? { ...i, localId: saved.id } : i))))
+      .catch(() =>
+        toast(
+          "No se pudo guardar una copia de la grabación en este dispositivo. Si falla la subida, se pierde.",
+          "error"
+        )
+      );
   }
 
   // --- Grabar desde el micrófono ---
@@ -164,6 +191,9 @@ export function TranscribeWorkspace({
   const micStreamRef = useRef<MediaStream | null>(null);
   const micChunksRef = useRef<Blob[]>([]);
   const micTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Duración en un ref además del estado: el closure de `onstop` se arma al empezar a grabar, así
+  // que leer el estado ahí daría siempre 0.
+  const micDurationRef = useRef(0);
 
   // --- Capturar audio de una reunión (pestaña/pantalla) ---
   const [capturing, setCapturing] = useState(false);
@@ -173,6 +203,7 @@ export function TranscribeWorkspace({
   const captureStreamRef = useRef<MediaStream | null>(null);
   const captureChunksRef = useRef<Blob[]>([]);
   const captureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const captureDurationRef = useRef(0);
 
   const addFiles = useCallback((files: FileList | null) => {
     if (!files?.length) return;
@@ -216,15 +247,19 @@ export function TranscribeWorkspace({
         const file = new File([blob], formatRecordingFileName("Grabacion", Date.now(), ext), {
           type: usedType,
         });
-        enqueueRecording(file);
+        enqueueRecording(file, "mic", micDurationRef.current);
         stream.getTracks().forEach((t) => t.stop());
       };
       recorder.start();
       micRecorderRef.current = recorder;
       micStreamRef.current = stream;
       setRecordingSeconds(0);
+      micDurationRef.current = 0;
       setRecording(true);
-      micTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      micTimerRef.current = setInterval(() => {
+        micDurationRef.current += 1;
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
     } catch (e) {
       const name = e instanceof DOMException ? e.name : "";
       setRecordError(
@@ -275,7 +310,7 @@ export function TranscribeWorkspace({
         const file = new File([blob], formatRecordingFileName("Reunion", Date.now(), ext), {
           type: usedType,
         });
-        enqueueRecording(file);
+        enqueueRecording(file, "meeting", captureDurationRef.current);
         displayStream.getTracks().forEach((t) => t.stop());
       };
       // Si el usuario corta el compartir desde el propio navegador, cerramos la grabación prolijamente.
@@ -284,8 +319,12 @@ export function TranscribeWorkspace({
       captureRecorderRef.current = recorder;
       captureStreamRef.current = displayStream;
       setCaptureSeconds(0);
+      captureDurationRef.current = 0;
       setCapturing(true);
-      captureTimerRef.current = setInterval(() => setCaptureSeconds((s) => s + 1), 1000);
+      captureTimerRef.current = setInterval(() => {
+        captureDurationRef.current += 1;
+        setCaptureSeconds((s) => s + 1);
+      }, 1000);
     } catch (e) {
       const name = e instanceof DOMException ? e.name : "";
       setCaptureError(
@@ -388,12 +427,13 @@ export function TranscribeWorkspace({
     let qualityWarning: string | null = null;
     let qualityWarningCount = 0;
     for (const item of toProcess) {
-      // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app.
+      // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app. Si era
+      // una grabación, en la biblioteca del dispositivo queda marcada como tal — así deja de
+      // ofrecer un reintento que volvería a fallar en este mismo chequeo, y ofrece descargarla.
       if (item.file.size > WEB_MAX_BYTES) {
-        patch(item.key, {
-          status: "error",
-          error: "Muy grande para la web (+4,5 MB). Usá la app de escritorio.",
-        });
+        const reason = "Muy grande para la web. Usá la app de escritorio.";
+        patch(item.key, { status: "error", error: reason });
+        if (item.localId) await updateRecording(item.localId, { status: "too_large", lastError: reason });
         failCount++;
         continue;
       }
@@ -411,23 +451,28 @@ export function TranscribeWorkspace({
         if (projectId) form.append("projectId", projectId);
         if (item.title) form.append("title", item.title);
 
-        const resp = await fetch("/api/transcribe", { method: "POST", body: form });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "No se pudo transcribir.");
+        // `postRecording` lee la respuesta como TEXTO y recién ahí la interpreta: la plataforma
+        // rechaza los payloads grandes en el borde con texto plano ("Request Entity Too Large"), y
+        // el `await resp.json()` que había acá explotaba con un error de parseo que tapaba la causa
+        // real. Ver `src/lib/recordings/upload.ts`.
+        const outcome = await postRecording(form);
+        await recordUploadOutcome(item.localId, outcome);
+        if (!outcome.ok) throw new Error(outcome.message);
+
         patch(item.key, {
-          status: data.duplicate ? "duplicate" : "done",
-          resultId: data.id ?? undefined,
+          status: outcome.duplicate ? "duplicate" : "done",
+          resultId: outcome.transcriptionId ?? undefined,
           // Título auto-generado por IA (o el que ya tenía guardado si era un duplicado) — cae al
           // título que la cola ya mostraba si el server no mandó uno (ver `resolveQueueTitle`).
-          title: resolveQueueTitle(data.title, item.title),
-          tags: Array.isArray(data.tags) ? data.tags : undefined,
+          title: resolveQueueTitle(outcome.title, item.title),
+          tags: outcome.tags.length ? outcome.tags : undefined,
         });
         okCount++;
-        if (!data.duplicate && data.audioStored === false) audioMissingCount++;
-        if (!data.duplicate && data.translationWarning) translationWarningCount++;
-        if (!data.duplicate && typeof data.qualityWarning === "string") {
+        if (!outcome.duplicate && !outcome.audioStored) audioMissingCount++;
+        if (!outcome.duplicate && outcome.translationWarning) translationWarningCount++;
+        if (!outcome.duplicate && outcome.qualityWarning) {
           qualityWarningCount++;
-          qualityWarning = data.qualityWarning;
+          qualityWarning = outcome.qualityWarning;
         }
       } catch (e) {
         patch(item.key, { status: "error", error: e instanceof Error ? e.message : "Error." });

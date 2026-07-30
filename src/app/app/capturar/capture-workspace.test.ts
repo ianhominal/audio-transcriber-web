@@ -21,6 +21,14 @@ describe("statusAnnouncement", () => {
     expect(statusAnnouncement("recording", "")).toBe(statusAnnouncement("recording", ""));
   });
 
+  // Fase agregada junto con la biblioteca del dispositivo (`src/lib/recordings/`): entre "Detener"
+  // y la subida ahora hay una escritura a IndexedDB, y esa espera tiene que anunciarse — si no, un
+  // lector de pantalla se queda mudo justo en el momento en que se está poniendo el audio a salvo.
+  it("anuncia el guardado en el dispositivo como una fase propia, distinta de la subida", () => {
+    expect(statusAnnouncement("saving", "")).toBe("Guardando la grabación en el dispositivo.");
+    expect(statusAnnouncement("saving", "")).not.toBe(statusAnnouncement("uploading", ""));
+  });
+
   it("en fase 'error' devuelve el mensaje recibido, o un fallback genérico si viene vacío", () => {
     expect(statusAnnouncement("error", "Permiso de micrófono denegado.")).toBe("Permiso de micrófono denegado.");
     expect(statusAnnouncement("error", "")).toBe("Ocurrió un error.");

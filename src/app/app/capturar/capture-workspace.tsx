@@ -7,11 +7,15 @@ import { Button, buttonClasses } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
+import { LocalRecordingsPanel } from "@/components/app/local-recordings-panel";
 import { formatDuration, formatRecordingFileName, defaultTitleFromFileName, formatFileSize } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
+import { saveRecording, updateRecording } from "@/lib/recordings/db";
+import { uploadStoredRecording } from "@/lib/recordings/flow";
+import { classifyUploadFailure } from "@/lib/recordings/policy";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
 
-type Phase = "idle" | "requesting" | "recording" | "uploading" | "done" | "error";
+type Phase = "idle" | "requesting" | "recording" | "saving" | "uploading" | "done" | "error";
 
 /**
  * Captura sin fricción (ver brainstorm homónimo): a diferencia de `TranscribeWorkspace`, esta
@@ -19,6 +23,11 @@ type Phase = "idle" | "requesting" | "recording" | "uploading" | "done" | "error
  * y al frenar sube DIRECTO a `/api/transcribe` con los defaults persistentes del usuario (mismos
  * `defaults.language`/`defaults.quality` que `TranscribeWorkspace` usa como valor inicial). Cero
  * pasos entre "se me ocurrió algo" y grabar.
+ *
+ * Regla que manda acá: la grabación se ESCRIBE en el dispositivo (ver `src/lib/recordings/`) apenas
+ * se detiene, ANTES de intentar subirla. Antes vivía solo en la RAM de la pestaña hasta que el
+ * server acusara recibo, así que un 413, una caída de red o Android reclamando la pestaña en
+ * segundo plano borraban un audio que no se puede volver a grabar. Ya pasó con una grabación real.
  */
 export function CaptureWorkspace({
   defaults,
@@ -45,40 +54,32 @@ export function CaptureWorkspace({
   // (ver "rescate del audio" en `/api/transcribe`), así que ofrecemos verla en vez de reintentar
   // — reintentar duplicaría la nota ya creada.
   const [rescuedId, setRescuedId] = useState<string | null>(null);
+  // Referencia a la grabación en curso DENTRO de la biblioteca del dispositivo. Reemplaza al viejo
+  // `pendingFile` (un File suelto en estado de React): ahora el audio vive en IndexedDB y esto es
+  // solo el puntero, así que el audio sobrevive a que la pestaña se recargue o el sistema la
+  // descarte. El título viaja con el id porque un reintento tiene que mandar el mismo que el
+  // primer intento.
+  const [stored, setStored] = useState<{ id: string; title: string } | null>(null);
+  // Fuerza a re-montar el panel de la biblioteca cuando cambia algo desde acá (guardar, subir).
+  const [libraryVersion, setLibraryVersion] = useState(0);
+  const refreshLibrary = useCallback(() => setLibraryVersion((v) => v + 1), []);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Última grabación pendiente de subir — permite "Reintentar" sin volver a grabar si solo falló
-  // la subida (no tiene sentido perder el audio ya grabado por un error de red transitorio). Vive
-  // en estado (no en un ref) porque el render la lee para decidir "Reintentar" vs "Grabar" — leer
-  // un ref durante el render rompe las reglas de React (el valor puede quedar desactualizado).
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  // Duración en el momento de frenar: `seconds` se resetea al empezar la próxima, y el registro de
+  // la biblioteca la necesita para mostrar "cuánto dura esto que no puedo escuchar todavía".
+  const durationRef = useRef(0);
 
-  // Grabación que NO entra por la web (supera WEB_MAX_BYTES). Estado PROPIO, separado de
-  // `pendingFile` a propósito: el render de abajo ofrece "Reintentar" cuando hay `pendingFile`, y
-  // reintentar una grabación oversize vuelve a fallar EXACTAMENTE igual — sería un botón que no
-  // puede funcionar nunca.
-  //
-  // Existe porque antes esto se TIRABA: el chequeo corre en `uploadRecording`, o sea DESPUÉS de
-  // que la usuaria apretó Detener, y el único lugar donde vivía el archivo era el closure de
-  // `onstop`. Grababas una hora, apretabas Detener, y la app te decía "muy grande" y perdías todo.
-  // El audio de una reunión no se repite. Que no entre por la web es una limitación real (el tope
-  // de subida de Vercel); tirarlo era una decisión nuestra, y estaba mal. `transcribe-workspace`
-  // ya hacía lo correcto ante este mismo chequeo: deja el archivo en la cola.
-  //
-  // El archivo y su URL de descarga viajan JUNTOS en un solo estado: se crean en el mismo momento
-  // y se revocan juntos. Separarlos obligaba a crear la URL dentro de un efecto, y un `setState`
-  // síncrono adentro de un efecto dispara renders en cascada.
-  const [oversize, setOversize] = useState<{ file: File; url: string } | null>(null);
-
-  // Revoca la URL al reemplazarse o al desmontar: una grabación larga pesa decenas de MB y sin
-  // revocar queda retenida en memoria toda la sesión. Este efecto NO setea estado: solo limpia.
+  // Último recurso cuando NI SIQUIERA se pudo escribir en el dispositivo (almacenamiento lleno, o
+  // un navegador sin IndexedDB): ahí el audio vuelve a existir solo en memoria, así que ofrecemos
+  // bajarlo YA. Es el único caso en que seguimos dependiendo de un object URL.
+  const [emergency, setEmergency] = useState<{ url: string; fileName: string } | null>(null);
   useEffect(() => {
-    if (!oversize) return;
-    return () => URL.revokeObjectURL(oversize.url);
-  }, [oversize]);
+    if (!emergency) return;
+    return () => URL.revokeObjectURL(emergency.url);
+  }, [emergency]);
 
   const stopTimer = () => {
     if (timerRef.current) {
@@ -87,71 +88,99 @@ export function CaptureWorkspace({
     }
   };
 
-  const uploadRecording = useCallback(
-    async (file: File) => {
-      if (file.size > WEB_MAX_BYTES) {
-        // El audio se CONSERVA (ver `oversizeFile`): no entra por la web, pero es de la usuaria y
-        // se lo puede bajar. Mismo criterio que `transcribe-workspace`, que ante este mismo chequeo
-        // deja el archivo en la cola en vez de descartarlo.
-        setOversize({ file, url: URL.createObjectURL(file) });
-        setPhase("error");
-        setMessage(
-          `Esta grabación pesa ${formatFileSize(file.size)} y por la web solo se pueden subir hasta ` +
-            `${formatFileSize(WEB_MAX_BYTES)}. No la perdiste: bajala y transcribila con la app de escritorio, ` +
-            `que no tiene límite de tamaño.`
-        );
-        return;
-      }
-      setPendingFile(file);
+  /** Sube una grabación YA guardada en el dispositivo y refleja el resultado en pantalla. */
+  const uploadStored = useCallback(
+    async (id: string, title: string) => {
+      setStored({ id, title });
       setPhase("uploading");
       setMessage("");
       setRescuedId(null);
-      try {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("language", defaults.language);
-        form.append("model", defaults.quality);
-        form.append("mode", "transcribe");
-        // Mismo título automático que `TranscribeWorkspace.enqueueRecording` (ver
-        // `defaultTitleFromFileName`/`isPlaceholderTitle` en el server): el server lo reemplaza por
-        // un título generado por IA en cuanto puede (paso 2.7 de `/api/transcribe`).
-        form.append("title", defaultTitleFromFileName(file.name));
+      const outcome = await uploadStoredRecording(id, {
+        language: defaults.language,
+        model: defaults.quality,
+        mode: "transcribe",
+        title,
+      });
+      refreshLibrary();
 
-        const resp = await fetch("/api/transcribe", { method: "POST", body: form });
-        const data = await resp.json();
-
-        if (!resp.ok) {
-          // El server ya intentó rescatar el audio: si nos devuelve un id, la grabación NO se
-          // perdió y reintentar crearía una nota duplicada — por eso soltamos `pendingFile`.
-          const saved = typeof data.id === "string" ? data.id : null;
-          if (saved) setPendingFile(null);
-          setRescuedId(saved);
-          setPhase("error");
-          setMessage(data.error || "No se pudo transcribir la grabación.");
-          router.refresh(); // la nota rescatada tiene que aparecer en el dashboard
-          return;
-        }
-
-        setPendingFile(null);
-        const newId = typeof data.id === "string" ? data.id : null;
-        setResultId(newId);
-        setPhase("done");
-        // La calidad se cambió sola por falta de cuota (ver paso 2-bis en /api/transcribe): hay que
-        // decirlo. El toast lo pinta el provider del layout, así que sobrevive al `replace` de abajo.
-        if (typeof data.qualityWarning === "string") toast(data.qualityWarning, "info");
-        router.refresh(); // que el dashboard vea la nueva transcripción
-        // "Que te lleve directamente": al terminar, la usuaria quiere VER su nota, no un link.
-        // `replace` (no `push`) a propósito — así esta pantalla sale del historial y volver atrás
-        // desde la transcripción lleva al dashboard, en vez de re-montar el grabador.
-        if (newId) router.replace(`/app/t/${newId}`);
-      } catch (e) {
-        // Acá solo caen fallas de red/parseo: el server nunca respondió, así que no hubo rescate y
-        // `pendingFile` sigue siendo válido para reintentar la subida sin volver a grabar.
+      if (!outcome.ok) {
+        // El server ya intentó rescatar el audio: si nos devuelve un id, la grabación NO se perdió
+        // y reintentar crearía una nota duplicada.
+        setRescuedId(outcome.rescuedId);
         setPhase("error");
-        setMessage(e instanceof Error ? e.message : "No se pudo subir la grabación.");
+        setMessage(outcome.message);
+        if (outcome.rescuedId) router.refresh(); // la nota rescatada tiene que aparecer en el dashboard
+        return;
       }
+
+      setResultId(outcome.transcriptionId);
+      setPhase("done");
+      // La calidad se cambió sola por falta de cuota (ver paso 2-bis en /api/transcribe): hay que
+      // decirlo. El toast lo pinta el provider del layout, así que sobrevive al `replace` de abajo.
+      if (outcome.qualityWarning) toast(outcome.qualityWarning, "info");
+      router.refresh(); // que el dashboard vea la nueva transcripción
+      // "Que te lleve directamente": al terminar, la usuaria quiere VER su nota, no un link.
+      // `replace` (no `push`) a propósito — así esta pantalla sale del historial y volver atrás
+      // desde la transcripción lleva al dashboard, en vez de re-montar el grabador.
+      if (outcome.transcriptionId) router.replace(`/app/t/${outcome.transcriptionId}`);
     },
-    [defaults.language, defaults.quality, router, toast]
+    [defaults.language, defaults.quality, refreshLibrary, router, toast]
+  );
+
+  /**
+   * Guarda la grabación recién frenada y recién ahí decide qué hacer con ella. El orden importa:
+   * cualquier cosa que falle después de este punto ya no puede costarle el audio a la usuaria.
+   */
+  const persistAndUpload = useCallback(
+    async (file: File, durationSec: number) => {
+      setPhase("saving");
+      setMessage("");
+      setEmergency(null);
+
+      const title = defaultTitleFromFileName(file.name);
+      let saved;
+      try {
+        saved = await saveRecording({
+          blob: file,
+          fileName: file.name,
+          title,
+          mimeType: file.type,
+          durationSec,
+          source: "mic",
+        });
+      } catch {
+        // No hay copia en ningún lado: es el único momento en que todavía se puede perder. Se dice
+        // fuerte y se ofrece la descarga inmediata, en vez de intentar subir y arriesgar el audio.
+        setEmergency({ url: URL.createObjectURL(file), fileName: file.name });
+        setPhase("error");
+        setMessage(
+          "No se pudo guardar la grabación en este dispositivo (puede que no quede espacio). " +
+            "Descargala ahora para no perderla."
+        );
+        return;
+      }
+
+      setStored({ id: saved.id, title });
+      refreshLibrary();
+
+      // Demasiado grande para la web: NO se intenta subir (la plataforma la rechaza en el borde),
+      // pero el audio ya está a salvo en el dispositivo y se puede bajar desde la biblioteca.
+      if (file.size > WEB_MAX_BYTES) {
+        const { message: reason } = classifyUploadFailure(413, "");
+        await updateRecording(saved.id, { status: "too_large", lastError: reason });
+        refreshLibrary();
+        setPhase("error");
+        setMessage(
+          `Esta grabación pesa ${formatFileSize(file.size)} y por la web solo se pueden subir hasta ` +
+            `${formatFileSize(WEB_MAX_BYTES)}. No la perdiste: quedó guardada en este dispositivo, ` +
+            `bajala y transcribila con la app de escritorio, que no tiene límite de tamaño.`
+        );
+        return;
+      }
+
+      await uploadStored(saved.id, title);
+    },
+    [refreshLibrary, uploadStored]
   );
 
   const startRecording = useCallback(async () => {
@@ -165,10 +194,7 @@ export function CaptureWorkspace({
     // the exact pattern the rule (and React's own docs) sanction — with no perceptible delay.
     await Promise.resolve();
     setMessage("");
-    // Limpia la grabación oversize de una corrida anterior (el useEffect revoca su URL): empezar a
-    // grabar de nuevo no puede dejar en pantalla el botón de descarga del audio viejo. Va acá y no
-    // solo en `recordAgain` porque a startRecording también se llega desde la pantalla en reposo.
-    setOversize(null);
+    setEmergency(null);
     setPhase("requesting");
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setPhase("error");
@@ -191,14 +217,18 @@ export function CaptureWorkspace({
           type: usedType,
         });
         stream.getTracks().forEach((t) => t.stop());
-        void uploadRecording(file);
+        void persistAndUpload(file, durationRef.current);
       };
       recorder.start();
       recorderRef.current = recorder;
       streamRef.current = stream;
       setSeconds(0);
+      durationRef.current = 0;
       setPhase("recording");
-      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+      timerRef.current = setInterval(() => {
+        durationRef.current += 1;
+        setSeconds((s) => s + 1);
+      }, 1000);
     } catch (e) {
       const name = e instanceof DOMException ? e.name : "";
       setPhase("error");
@@ -208,25 +238,23 @@ export function CaptureWorkspace({
           : "No se pudo acceder al micrófono."
       );
     }
-  }, [uploadRecording]);
+  }, [persistAndUpload]);
 
   const stopRecording = useCallback(() => {
     stopTimer();
-    recorderRef.current?.stop(); // dispara onstop, que sube la grabación
+    recorderRef.current?.stop(); // dispara onstop, que guarda y sube la grabación
     recorderRef.current = null;
   }, []);
 
   const retryUpload = useCallback(() => {
-    if (pendingFile) void uploadRecording(pendingFile);
-  }, [pendingFile, uploadRecording]);
+    if (stored) void uploadStored(stored.id, stored.title);
+  }, [stored, uploadStored]);
 
   const recordAgain = useCallback(() => {
     setResultId(null);
-    setPendingFile(null);
+    setStored(null);
     setRescuedId(null);
-    // Sin esto, el botón "Descargar la grabación" de la corrida anterior sobrevive a la nueva y
-    // termina ofreciendo un audio viejo. El useEffect de arriba revoca su URL al limpiarse.
-    setOversize(null);
+    setEmergency(null);
     void startRecording();
   }, [startRecording]);
 
@@ -336,6 +364,13 @@ export function CaptureWorkspace({
         </div>
       )}
 
+      {phase === "saving" && (
+        <div className="flex flex-col items-center gap-3">
+          <Spinner size="lg" className="text-accent" />
+          <p className="text-secondary">Guardando la grabación…</p>
+        </div>
+      )}
+
       {phase === "uploading" && (
         <div className="flex flex-col items-center gap-3">
           <Spinner size="lg" className="text-accent" />
@@ -375,31 +410,28 @@ export function CaptureWorkspace({
           <p role="alert" className="text-secondary">
             {message || "Ocurrió un error."}
           </p>
-          {/* El audio no se perdió: el server lo guardó igual (ver "rescate del audio" en
-              `/api/transcribe`). Decirlo explícito importa — el miedo real de la usuaria acá es
-              haber perdido una grabación que no puede repetir. */}
-          {rescuedId && (
+          {/* El miedo real de la usuaria acá es haber perdido una grabación que no puede repetir,
+              así que decirlo explícito importa. `storedId` = está en la biblioteca del dispositivo
+              (el panel de abajo la lista); `rescuedId` = además el server la rescató. */}
+          {rescuedId ? (
             <p className="text-sm text-tertiary">Tu audio quedó guardado igual: solo falta el texto.</p>
-          )}
+          ) : stored ? (
+            <p className="text-sm text-tertiary">No la perdiste: quedó guardada en este dispositivo.</p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-center gap-3">
             {rescuedId ? (
               <Link href={`/app/t/${rescuedId}`} className={buttonClasses({ size: "lg" })}>
                 <Icon name="note" className="shrink-0" />
                 Ver la nota con el audio
               </Link>
-            ) : oversize ? (
-              /* Grabación que no entra por la web: la acción primaria es BAJARLA. A propósito NO se
-                 ofrece "Reintentar" acá — volvería a fallar idéntico en el mismo chequeo. */
-              <>
-                <a href={oversize.url} download={oversize.file.name} className={buttonClasses({ size: "lg" })}>
-                  <Icon name="download" className="shrink-0" />
-                  Descargar la grabación
-                </a>
-                <Link href="/descargar" className="text-sm font-semibold text-accent hover:underline">
-                  Ver la app de escritorio →
-                </Link>
-              </>
-            ) : pendingFile ? (
+            ) : emergency ? (
+              /* No se pudo escribir en el dispositivo: el audio solo existe en esta pestaña, así
+                 que bajarlo YA es la única acción que lo salva. */
+              <a href={emergency.url} download={emergency.fileName} className={buttonClasses({ size: "lg" })}>
+                <Icon name="download" className="shrink-0" />
+                Descargar la grabación
+              </a>
+            ) : stored ? (
               <Button onClick={retryUpload} size="lg">
                 Reintentar
               </Button>
@@ -415,6 +447,18 @@ export function CaptureWorkspace({
           </div>
         </div>
       )}
+      </div>
+
+      {/* Biblioteca del dispositivo: lo que todavía no llegó al server se ve SIEMPRE acá, no solo
+          en la pantalla de error de la corrida actual — una grabación pendiente de ayer tiene que
+          seguir a la vista hoy. `key` fuerza el re-montaje cuando esta pantalla toca la biblioteca. */}
+      <div className="mt-8">
+        <LocalRecordingsPanel key={libraryVersion} defaults={defaults} pendingOnly onUploaded={refreshLibrary} />
+        <p className="mt-4 text-left text-xs text-tertiary">
+          <Link href="/app/grabaciones" className="font-semibold text-accent hover:underline">
+            Ver todas las grabaciones de este dispositivo →
+          </Link>
+        </p>
       </div>
     </div>
   );
@@ -434,6 +478,8 @@ export function statusAnnouncement(phase: Phase, message: string): string {
       return "Pidiendo permiso de micrófono.";
     case "recording":
       return "Grabando.";
+    case "saving":
+      return "Guardando la grabación en el dispositivo.";
     case "uploading":
       return "Transcribiendo tu idea.";
     case "done":
