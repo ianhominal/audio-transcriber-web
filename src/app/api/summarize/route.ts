@@ -4,6 +4,8 @@ import { getApiUser } from "@/lib/supabase/api";
 import { isMissingColumnError, isMissingTableError } from "@/lib/supabase/schema-compat";
 import { translationLanguageLabel } from "@/lib/translate/languages";
 import { summarizeText } from "@/lib/summary/groq";
+import { summarizeTextWithGemini } from "@/lib/summary/gemini";
+import { planSummary } from "@/lib/summary/engine";
 import { parseStoredSummary, serializeSummary } from "@/lib/summary/format";
 import { canSummarizeText } from "@/lib/summary/validate";
 import { hashSummarySource } from "@/lib/summary/hash";
@@ -213,11 +215,36 @@ export async function POST(req: NextRequest) {
         ? translationLanguageLabel(row.language)
         : null;
 
-  const result = await summarizeText(text, languageLabel, apiKey);
+  // 3.5) Elegir el motor según el LARGO del texto (ver `src/lib/summary/engine.ts`).
+  //
+  //      El free tier de Groq da 6.000 tokens por MINUTO a `llama-3.1-8b-instant`, y un request más
+  //      grande que ese tope se rechaza SIEMPRE ("Request too large") — no es un rate limit que un
+  //      reintento resuelva. Con el cap viejo de 40.000 chars, cualquier nota larga pedía ~12.234
+  //      tokens y devolvía 502 con el error crudo de Groq en inglés, con link de facturación incluido.
+  //      Chunkear no alcanzaba: el tope es agregado por minuto y por organización, así que N pedazos
+  //      suman los mismos tokens en la misma ventana, y `maxDuration = 30` no da para esperar.
+  //
+  //      Para lo largo se usa Gemini (free tier: 250K TPM), que se come una reunión de 3 horas en un
+  //      solo request. Groq sigue siendo el motor de todo lo corto: es rápido, barato y ya cacheado.
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const plan = planSummary({ chars: text.length, hasGeminiKey: !!geminiKey });
+  const boundedText = text.slice(0, plan.maxChars);
+
+  const result =
+    plan.engine === "gemini" && geminiKey
+      ? await summarizeTextWithGemini(boundedText, languageLabel, geminiKey)
+      : await summarizeText(boundedText, languageLabel, apiKey);
+
   if (!result.ok) {
-    console.error("[summarize] failed", { userId: user.id, transcriptionId: id, error: result.error });
+    console.error("[summarize] failed", {
+      userId: user.id,
+      transcriptionId: id,
+      engine: plan.engine,
+      chars: text.length,
+      error: result.error,
+    });
     Sentry.captureException(new Error(result.error), {
-      extra: { userId: user.id, transcriptionId: id, stage: "summarize" },
+      extra: { userId: user.id, transcriptionId: id, stage: "summarize", engine: plan.engine },
     });
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
@@ -241,5 +268,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ...result.summary, cached: false });
+  // `truncated` viaja al cliente para que pueda AVISAR que el resumen cubre solo el comienzo del
+  // texto. Antes el recorte a 40.000 chars pasaba en silencio: una reunión de 3 horas se resumía por
+  // su primer tercio y nadie se enteraba. Hoy solo puede pasar sin `GEMINI_API_KEY` configurada, o
+  // con un texto que supere incluso el tope de Gemini.
+  return NextResponse.json({ ...result.summary, cached: false, truncated: plan.truncated });
 }

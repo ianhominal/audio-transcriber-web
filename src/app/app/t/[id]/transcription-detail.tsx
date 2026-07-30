@@ -338,6 +338,12 @@ export function TranscriptionDetail({
       }
       setSummary({ summary: data.summary, keyPoints: data.keyPoints ?? [], actionItems: data.actionItems ?? [] });
       setSummaryText(text);
+      // El servidor avisa cuando el texto no entró entero y el resumen cubre solo el comienzo (ver
+      // `planSummary`). Antes ese recorte pasaba en silencio: una nota larga se resumía por su primer
+      // tercio y el resumen se leía como si fuera del texto completo.
+      if (data.truncated) {
+        toast("La nota es muy larga: el resumen cubre solo el comienzo.", "info");
+      }
     } catch {
       toast("No se pudo contactar al servidor.", "error");
     } finally {

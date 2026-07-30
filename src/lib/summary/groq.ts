@@ -1,4 +1,5 @@
 import { parseModelSummaryResponse, type SummaryResult } from "./format";
+import { GROQ_SAFE_SUMMARY_CHARS } from "./engine";
 
 const GROQ_CHAT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -8,15 +9,21 @@ const GROQ_CHAT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const SUMMARY_MODEL = "llama-3.1-8b-instant";
 
 /**
- * Tope de caracteres del texto que se manda a Groq para resumir. `llama-3.1-8b-instant` tiene una
- * ventana de contexto amplia, pero una transcripción no debería acercarse ni de lejos a este piso
- * (un audio de 25 MB ~ pocas decenas de miles de caracteres) — este cap NO existe para "entrar en
- * la ventana", existe como defensa dura contra costo/abuso: acota el gasto por request y evita un
- * 400 de Groq por exceso de tokens ante un texto anómalo. Se recorta en `summarizeText` (no en la
- * UI) para que el límite valga para CUALQUIER caller — la validación del cliente nunca es la
- * frontera de confianza, mismo criterio que las allowlists de `resolveGroqModel`/idiomas.
+ * Tope de caracteres que se le mandan a Groq para resumir.
+ *
+ * CORREGIDO (2026-07-30): antes eran 40.000 caracteres, con el razonamiento de que la ventana de
+ * contexto del modelo era amplia y esto era solo una cota de costo. Ese razonamiento ignoraba el
+ * límite que de verdad manda en el free tier: **6.000 tokens por MINUTO**. 40.000 caracteres pedían
+ * ~12.234 tokens, así que TODA nota larga fallaba con "Request too large" — y no es un rate limit
+ * transitorio, un request más grande que el tope se rechaza siempre. Ahora vale
+ * `GROQ_SAFE_SUMMARY_CHARS`, calculado a partir de ese tope (ver `./engine.ts`).
+ *
+ * Los textos que no entran acá NO se recortan: van a Gemini, que tiene lugar de sobra
+ * (`planSummary`). Este slice queda como defensa dura para cualquier caller que llame a
+ * `summarizeText` directo — la validación de quien llama nunca es la frontera de confianza, mismo
+ * criterio que las allowlists de `resolveGroqModel`/idiomas.
  */
-export const MAX_SUMMARY_INPUT_CHARS = 40_000;
+export const MAX_SUMMARY_INPUT_CHARS = GROQ_SAFE_SUMMARY_CHARS;
 
 // Techo de tokens de salida — cota de costo/abuso (auditoría 2026-07-10, hallazgo MEDIUM #3: el
 // endpoint no tenía `max_tokens`, así que un desvío del modelo podía generar una respuesta
