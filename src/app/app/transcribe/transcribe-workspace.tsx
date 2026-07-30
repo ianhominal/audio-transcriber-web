@@ -14,6 +14,7 @@ import {
   resolveQueueTitle,
 } from "@/lib/format";
 import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
+import { FILE_ACCEPT } from "@/lib/transcribe/accept";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -29,11 +30,9 @@ import {
   type TranslationLanguageCode,
 } from "@/lib/translate/languages";
 
-// Formatos que Groq/Whisper acepta nativamente (mp4/mpeg incluidos: extrae el audio del video).
-const SUPPORTED = [
-  ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".mp4",
-  ".mpeg", ".mpga", ".flac", ".webm",
-];
+// FILE_ACCEPT y SUPPORTED_EXTENSIONS viven en @/lib/transcribe/accept: la lista de extensiones sola
+// rompía el selector de archivos en Android (ofrecía solo cámara y galería), así que el `accept`
+// ahora lleva MIME types además de las extensiones. Ver los tests de regresión de ese módulo.
 
 // WEB_MAX_BYTES, AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType ahora viven en
 // @/lib/recording — se comparten con `/app/capturar` (ver `capture-workspace.tsx`), que necesita
@@ -673,7 +672,7 @@ export function TranscribeWorkspace({
           ref={inputRef}
           type="file"
           multiple
-          accept={SUPPORTED.join(",")}
+          accept={FILE_ACCEPT}
           className="hidden"
           aria-hidden="true"
           tabIndex={-1}
