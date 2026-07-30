@@ -236,6 +236,37 @@ export function isDriveFolder(child: Pick<DriveChildResult, "mimeType">): boolea
 }
 
 /**
+ * `files.get` de UNA carpeta por id, para resolver un link de Drive pegado a mano (ver
+ * `parseDriveFolderId` en `./folder-link.ts`). Devuelve `null` si el id existe pero NO es una
+ * carpeta, así el caller puede dar un mensaje preciso ("ese link es de un archivo, no de una
+ * carpeta") en vez de un error genérico; si el id no existe o no es accesible, `driveFetch` ya tira
+ * `DriveApiError` con el 404/403 de Google.
+ *
+ * `supportsAllDrives` va en true a propósito: sin eso, una carpeta de una unidad compartida (Shared
+ * Drive) responde 404 aunque el usuario la vea perfectamente en su Drive. Es el mismo tipo de
+ * carpeta "invisible" que motivó esta función — el navegador de carpetas de Ajustes desciende desde
+ * `root` y nunca llega a lo que está compartido con el usuario.
+ */
+export async function getFolderById(
+  accessToken: string,
+  folderId: string
+): Promise<{ id: string; name: string } | null> {
+  const params = new URLSearchParams({
+    fields: "id,name,mimeType,trashed",
+    supportsAllDrives: "true",
+  });
+
+  const res = await driveFetch(
+    `${DRIVE_FILES_URL}/${encodeURIComponent(folderId)}?${params.toString()}`,
+    accessToken
+  );
+  const data = (await res.json()) as { id: string; name: string; mimeType: string; trashed?: boolean };
+
+  if (!isDriveFolder(data) || data.trashed) return null;
+  return { id: data.id, name: data.name };
+}
+
+/**
  * `files.list` de los hijos DIRECTOS de `folderId` (archivos Y subcarpetas), paginado. Base
  * para la importación jerárquica de la fase siguiente (doc 10): el caller decide si desciende,
  * llamando de nuevo con el `id` de cada subcarpeta devuelta (BFS/DFS) — esta función solo lista
@@ -346,6 +377,37 @@ export async function updateFile(
 export async function getFileContent(accessToken: string, fileId: string): Promise<string> {
   const res = await driveFetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, accessToken);
   return res.text();
+}
+
+/**
+ * Baja un archivo BINARIO de Drive (un audio), junto con su nombre y su tipo. Distinta de
+ * `getFileContent`, que devuelve texto y sirve para los `.md`: acá el contenido va tal cual a Groq
+ * como parte de un `FormData`, y decodificarlo como string lo corrompería.
+ *
+ * Devuelve también `sizeBytes` para poder frenar ANTES de mandarlo un archivo que Groq va a rechazar
+ * por tamaño (mismo criterio que el desktop con `EngineSelector`: decidir antes de subir, no cosechar
+ * un 413 después de gastar la transferencia).
+ */
+export async function downloadFileBinary(
+  accessToken: string,
+  fileId: string
+): Promise<{ blob: Blob; name: string; sizeBytes: number }> {
+  const metaParams = new URLSearchParams({ fields: "name,size,mimeType", supportsAllDrives: "true" });
+  const metaRes = await driveFetch(
+    `${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}?${metaParams.toString()}`,
+    accessToken
+  );
+  const meta = (await metaRes.json()) as { name?: string; size?: string };
+
+  const res = await driveFetch(
+    `${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+    accessToken
+  );
+  const blob = await res.blob();
+
+  // `size` viene como string y NO existe para los Google Docs nativos; el tamaño real del blob es la
+  // fuente de verdad, el metadato solo sirve de referencia.
+  return { blob, name: meta.name ?? "audio", sizeBytes: blob.size || Number(meta.size ?? 0) };
 }
 
 /** Mueve un archivo a la papelera de Drive (recuperable), en vez de borrarlo en duro. */

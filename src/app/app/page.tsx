@@ -28,6 +28,7 @@ import { ProjectTree } from "./project-tree";
 import { ShareProjectButton } from "./share-project-button";
 import { OnboardingWelcome } from "@/components/app/onboarding-welcome";
 import { ResurfaceCard } from "./resurface-card";
+import { DriveAudioQueue } from "./drive-audio-queue";
 import { SearchBar } from "./search-bar";
 import { SubfolderCard } from "./subfolder-card";
 import { TranscriptionRow } from "./transcription-row";
@@ -462,6 +463,12 @@ export default async function Dashboard({
               <OnboardingWelcome hasAnyNotes={total > 0} recordHref="/app/capturar?grabar=1" uploadHref={newHref} />
             )}
             <ResurfaceCard candidates={resurfaceCandidates} />
+            {/* Audios traídos de una carpeta de Drive que todavía no se transcribieron. Se trae sus
+                propios datos (GET /api/drive/transcribe) en vez de sumar `drive_audio_file_id` a la
+                query de arriba: esa columna es nueva y meterla acá obligaría a extender la cascada de
+                compat de `fetchTranscriptionsCompat` para un banner opcional. Si no hay pendientes no
+                renderiza nada. */}
+            <DriveAudioQueue />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{heading}</h1>
               <div className="flex flex-wrap items-center gap-2">

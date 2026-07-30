@@ -178,12 +178,74 @@ describe("planDriveImport", () => {
     ]);
   });
 
-  it("ignora archivos que no son carpeta ni .md (audio, PDF, etc.)", () => {
+  it("importa los AUDIOS e ignora el resto (PDF, imágenes, etc.)", () => {
+    // Antes los audios caían en skippedOtherFiles junto con todo lo demás: conectar una carpeta
+    // llena de grabaciones no traía nada. Ahora entran como audios pendientes de transcribir; un
+    // PDF sigue estando fuera de alcance.
     const root = folder("root", "Reuniones", [file("a1", "audio.m4a"), file("p1", "notas.pdf")]);
     const plan = planDriveImport(root);
+
     expect(plan.projectsToCreate).toEqual([]);
     expect(plan.transcriptionsToCreate).toEqual([]);
-    expect(plan.skippedOtherFiles).toBe(2);
+    expect(plan.audiosToImport).toEqual([
+      { driveFileId: "a1", name: "audio.m4a", parentDriveFolderId: "root" },
+    ]);
+    expect(plan.skippedOtherFiles).toBe(1);
+  });
+
+  it("reconoce todas las extensiones de audio que acepta la transcripción", () => {
+    // Misma lista que el input de archivos (SUPPORTED_EXTENSIONS): si un formato se puede subir a
+    // mano, se tiene que poder importar desde Drive. Incluye contenedores de video, de los que
+    // Whisper extrae el audio.
+    const root = folder("root", "Todo", [
+      file("f1", "uno.mp3"),
+      file("f2", "dos.wav"),
+      file("f3", "tres.m4a"),
+      file("f4", "cuatro.ogg"),
+      file("f5", "cinco.opus"),
+      file("f6", "seis.flac"),
+      file("f7", "siete.mp4"),
+      file("f8", "ocho.webm"),
+      file("f9", "nueve.mpeg"),
+      file("f10", "diez.mpga"),
+    ]);
+
+    const plan = planDriveImport(root);
+
+    expect(plan.audiosToImport).toHaveLength(10);
+    expect(plan.skippedOtherFiles).toBe(0);
+  });
+
+  it("reconoce la extensión sin importar mayúsculas", () => {
+    const root = folder("root", "Reuniones", [file("a1", "GRABACION.M4A"), file("a2", "Otra.Mp3")]);
+    const plan = planDriveImport(root);
+    expect(plan.audiosToImport.map((a) => a.driveFileId)).toEqual(["a1", "a2"]);
+  });
+
+  it("no re-importa un audio ya mapeado", () => {
+    // Misma idempotencia que los .md: reconectar la carpeta no duplica los audios traídos antes.
+    const root = folder("root", "Reuniones", [file("a1", "vieja.m4a"), file("a2", "nueva.m4a")]);
+
+    const plan = planDriveImport(root, { existingFileIds: new Set(["a1"]) });
+
+    expect(plan.audiosToImport).toEqual([
+      { driveFileId: "a2", name: "nueva.m4a", parentDriveFolderId: "root" },
+    ]);
+    expect(plan.skippedExistingFiles).toBe(1);
+  });
+
+  it("ubica cada audio en la subcarpeta que le corresponde", () => {
+    const root = folder("root", "Clases", [
+      folder("sem1", "Semana 1", [file("a1", "lunes.m4a")]),
+      file("a2", "suelto.mp3"),
+    ]);
+
+    const plan = planDriveImport(root);
+
+    expect(plan.audiosToImport).toEqual([
+      { driveFileId: "a1", name: "lunes.m4a", parentDriveFolderId: "sem1" },
+      { driveFileId: "a2", name: "suelto.mp3", parentDriveFolderId: "root" },
+    ]);
   });
 
   it("idempotencia: carpetas/archivos ya mapeados no se re-planean, pero SÍ se desciende dentro de carpetas existentes", () => {

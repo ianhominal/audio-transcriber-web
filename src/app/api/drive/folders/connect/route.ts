@@ -6,6 +6,7 @@ import { getUserDriveAccessToken, DriveNotConnectedError } from "@/lib/drive/con
 import { planDriveImport, type DriveImportPlan } from "@/lib/drive/tree";
 import { computeContentHash } from "@/lib/drive/reconcile";
 import { parseMarkdownExport, validateProjectName } from "@/lib/format";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -109,6 +110,23 @@ export async function POST(req: NextRequest) {
     const existingFolderIds = new Set(mapRows.filter((m) => m.kind === "project").map((m) => m.drive_file_id));
     const existingFileIds = new Set(mapRows.filter((m) => m.kind === "transcription").map((m) => m.drive_file_id));
 
+    // Audios ya importados. Van aparte del `drive_file_map` a propósito (ver el bloque 4b), así que
+    // la idempotencia de los audios se resuelve leyendo la columna `drive_audio_file_id` — si no,
+    // reconectar la carpeta duplicaría cada grabación. `isMissingColumnError` cubre la ventana de
+    // rollout de la migración: sin la columna se sigue sin idempotencia de audios (y el insert de
+    // más abajo también va a fallar, así que no se duplica nada igual).
+    const { data: audioRows, error: audioRowsError } = await supabase
+      .from("transcriptions")
+      .select("drive_audio_file_id")
+      .eq("user_id", user.id)
+      .not("drive_audio_file_id", "is", null);
+    if (audioRowsError && !isMissingColumnError(audioRowsError)) {
+      console.error("[drive/folders/connect] error leyendo audios ya importados:", audioRowsError.message);
+    }
+    for (const row of (audioRows ?? []) as { drive_audio_file_id: string | null }[]) {
+      if (row.drive_audio_file_id) existingFileIds.add(row.drive_audio_file_id);
+    }
+
     const localProjectIdByDriveFolderId = new Map<string, string>();
     localProjectIdByDriveFolderId.set(driveFolderId, rootProjectId);
     for (const m of mapRows) {
@@ -205,6 +223,46 @@ export async function POST(req: NextRequest) {
       importedTranscriptions++;
     }
 
+    // ---- 4b. Audios: se crean como transcripciones PENDIENTES (sin texto) que apuntan al archivo
+    //      de Drive por `drive_audio_file_id`. NO se baja el binario acá: 14 audios no entran en el
+    //      `maxDuration = 60` de esta ruta, y transcribirlos consume cuota de Groq — es una acción
+    //      aparte y explícita (`/api/drive/transcribe`).
+    //
+    //      CRÍTICO: estas filas NO van a `drive_file_map`. Ese mapa habilita la acción `push_update`
+    //      de `reconcileDriveSync`, que escribe el Markdown de la nota ENCIMA del archivo de Drive
+    //      mapeado — con el .m4a ahí, el primer sync le sobrescribiría el audio original al usuario.
+    //      Al quedar fuera del mapa, el motor de sync no puede tocar el audio, y la transcripción
+    //      (sin mapeo) se exporta luego como un .md NUEVO al lado del audio, que es lo que se quiere.
+    let importedAudios = 0;
+    let failedAudios = 0;
+
+    for (const step of plan.audiosToImport) {
+      const parentLocalId = localProjectIdByDriveFolderId.get(step.parentDriveFolderId);
+      if (!parentLocalId) {
+        failedAudios++;
+        continue;
+      }
+
+      const { error } = await supabase.from("transcriptions").insert({
+        user_id: user.id,
+        project_id: parentLocalId,
+        title: step.name.replace(/\.[^.]+$/, ""),
+        audio_name: step.name,
+        text: "",
+        drive_audio_file_id: step.driveFileId,
+      });
+      if (error) {
+        // `drive_audio_file_id` es una columna NUEVA (ver migración 20260730120000): durante la
+        // ventana de rollout puede no existir todavía en el esquema real. Mismo criterio de
+        // degradación que el resto del repo (`schema-compat.ts`): el resto de la importación —
+        // subcarpetas y notas .md — ya se completó y no se tira abajo por esto.
+        console.error(`[drive/folders/connect] error importando audio ${step.name}:`, error.message);
+        failedAudios++;
+        continue;
+      }
+      importedAudios++;
+    }
+
     if (newMapRows.length > 0) {
       const { error: mapError } = await supabase
         .from("drive_file_map")
@@ -220,13 +278,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       projectId: rootProjectId,
-      imported: { projects: createdProjects, transcriptions: importedTranscriptions },
+      imported: { projects: createdProjects, transcriptions: importedTranscriptions, audios: importedAudios },
       skipped: {
         existingFolders: plan.skippedExistingFolders,
         existingFiles: plan.skippedExistingFiles,
         otherFiles: plan.skippedOtherFiles,
       },
-      failed: { projects: failedProjects, transcriptions: failedTranscriptions },
+      failed: { projects: failedProjects, transcriptions: failedTranscriptions, audios: failedAudios },
       depthTruncated: plan.depthTruncated,
     });
   } catch (err) {

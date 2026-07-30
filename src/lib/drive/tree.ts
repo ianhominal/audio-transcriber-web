@@ -4,6 +4,7 @@
  * llamadas reales a Drive/Supabase vive en `src/lib/drive/api.ts` (fetch del árbol) y en las
  * rutas de `src/app/api/drive/folders/*` (ejecución del plan).
  */
+import { SUPPORTED_EXTENSIONS } from "@/lib/transcribe/accept";
 
 // ---------------------------------------------------------------------------
 // A. Árbol de proyectos para el sidebar (a partir de la lista plana con parent_project_id)
@@ -269,15 +270,32 @@ export type PlannedTranscriptionStep = {
   parentDriveFolderId: string;
 };
 
+/**
+ * Un archivo de AUDIO encontrado en la carpeta. Se materializa como una transcripción PENDIENTE
+ * (sin texto todavía) que apunta al archivo de Drive por `drive_audio_file_id`, para transcribirla
+ * después — ver `/api/drive/folders/connect` y `/api/drive/transcribe`.
+ *
+ * Deliberadamente separado de `PlannedTranscriptionStep`: un `.md` se BAJA y su contenido se guarda
+ * en el acto; un audio solo se referencia (bajarlo y transcribirlo no entra en el tiempo de un
+ * request, y son dos permisos de costo muy distintos).
+ */
+export type PlannedAudioStep = {
+  driveFileId: string;
+  name: string;
+  parentDriveFolderId: string;
+};
+
 export type DriveImportPlan = {
   /** En orden padre-primero (pre-order): siempre se puede resolver el `local id` del padre antes de crear el hijo. */
   projectsToCreate: PlannedProjectStep[];
   transcriptionsToCreate: PlannedTranscriptionStep[];
+  /** Audios a importar como transcripciones pendientes (ver `PlannedAudioStep`). */
+  audiosToImport: PlannedAudioStep[];
   /** Carpetas que ya estaban mapeadas (reconexión idempotente): no se crean de nuevo, pero SÍ se desciende dentro. */
   skippedExistingFolders: number;
-  /** Archivos `.md` que ya estaban mapeados: no se duplican. */
+  /** Archivos `.md` o de audio que ya estaban mapeados: no se duplican. */
   skippedExistingFiles: number;
-  /** Archivos que no son carpeta ni `.md` (audio, PDF, etc.): fuera de alcance de esta fase, se ignoran. */
+  /** Archivos que no son carpeta, ni `.md`, ni audio (PDF, imágenes, etc.): fuera de alcance, se ignoran. */
   skippedOtherFiles: number;
   /** `true` si algún subárbol se cortó por superar `maxDepth` (protección anti-recursión-infinita). */
   depthTruncated: boolean;
@@ -287,6 +305,19 @@ const DEFAULT_MAX_DEPTH = 20;
 
 function isMarkdownFile(name: string): boolean {
   return name.toLowerCase().endsWith(".md");
+}
+
+/**
+ * Audio (o contenedor de video del que Whisper extrae el audio) que la app sabe transcribir.
+ *
+ * Reusa `SUPPORTED_EXTENSIONS` — la MISMA lista que el input de archivos de `/app/transcribe` — a
+ * propósito: si un formato se puede subir a mano, se tiene que poder importar desde Drive. Dos listas
+ * separadas se desincronizan y el usuario termina con un archivo que la app acepta por un camino y
+ * silenciosamente ignora por el otro.
+ */
+function isAudioFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SUPPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**
@@ -312,6 +343,7 @@ export function planDriveImport(
 
   const projectsToCreate: PlannedProjectStep[] = [];
   const transcriptionsToCreate: PlannedTranscriptionStep[] = [];
+  const audiosToImport: PlannedAudioStep[] = [];
   let skippedExistingFolders = 0;
   let skippedExistingFiles = 0;
   let skippedOtherFiles = 0;
@@ -341,6 +373,12 @@ export function planDriveImport(
         } else {
           transcriptionsToCreate.push({ driveFileId: child.driveId, name: child.name, parentDriveFolderId });
         }
+      } else if (isAudioFile(child.name)) {
+        if (existingFileIds.has(child.driveId)) {
+          skippedExistingFiles++;
+        } else {
+          audiosToImport.push({ driveFileId: child.driveId, name: child.name, parentDriveFolderId });
+        }
       } else {
         skippedOtherFiles++;
       }
@@ -352,6 +390,7 @@ export function planDriveImport(
   return {
     projectsToCreate,
     transcriptionsToCreate,
+    audiosToImport,
     skippedExistingFolders,
     skippedExistingFiles,
     skippedOtherFiles,

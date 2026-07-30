@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
 import { canConnectFolderLevel, validateNewFolderName } from "@/lib/drive/folder-connect";
+import { parseDriveFolderId } from "@/lib/drive/folder-link";
 
 type DriveFolder = { id: string; name: string };
 type Crumb = { id: string; name: string };
@@ -15,7 +16,9 @@ type Crumb = { id: string; name: string };
 const ROOT_CRUMB: Crumb = { id: "root", name: "Mi unidad" };
 
 type ImportSummary = {
-  imported: { projects: number; transcriptions: number };
+  // `audios` es opcional: durante la ventana de rollout de la migración que agrega
+  // `drive_audio_file_id` el servidor puede no devolverlo todavía.
+  imported: { projects: number; transcriptions: number; audios?: number };
   skipped: { existingFolders: number; existingFiles: number; otherFiles: number };
   depthTruncated: boolean;
 };
@@ -40,6 +43,12 @@ export function DriveFolderConnect() {
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [createFolderError, setCreateFolderError] = useState<string | null>(null);
+  // Pegar el link de una carpeta. Es el ÚNICO camino a una carpeta COMPARTIDA con el usuario: el
+  // árbol de abajo desciende desde `root` ("Mi unidad") y lo compartido no es hijo de root, así que
+  // navegando nunca aparece.
+  const [linkInput, setLinkInput] = useState("");
+  const [resolvingLink, setResolvingLink] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const current = crumbs[crumbs.length - 1];
   const canConnect = canConnectFolderLevel(current.id);
@@ -97,6 +106,42 @@ export function DriveFolderConnect() {
   function enterFolder(folder: DriveFolder) {
     resetCreateForm();
     setCrumbs((prev) => [...prev, { id: folder.id, name: folder.name }]);
+  }
+
+  /**
+   * Resuelve el link pegado y entra a esa carpeta, dejándola lista para conectar con el mismo botón
+   * de siempre. NO conecta sola: el usuario ve el nombre real que devolvió Drive antes de importar
+   * nada — pegar un link equivocado e importar un árbol ajeno sin confirmación sería una sorpresa
+   * cara en un flujo que ya es cuidadoso justamente con eso (ver `canConnectFolderLevel` y la raíz).
+   *
+   * El breadcrumb se REEMPLAZA en vez de apilarse: la carpeta pegada no cuelga de donde estabas
+   * navegando (puede estar en otra cuenta o en "Compartido conmigo"), así que mostrar
+   * "Mi unidad / … / Pegada" sería una jerarquía inventada.
+   */
+  async function submitLink() {
+    const folderId = parseDriveFolderId(linkInput);
+    if (!folderId) {
+      setLinkError("Ese no parece un link de carpeta de Drive. Copiá el link desde Drive con “Compartir → Copiar vínculo”.");
+      return;
+    }
+
+    setResolvingLink(true);
+    setLinkError(null);
+    try {
+      const res = await fetch(`/api/drive/folders?id=${encodeURIComponent(folderId)}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "No se pudo abrir esa carpeta.");
+
+      const folder = body.folder as DriveFolder;
+      resetCreateForm();
+      setLinkInput("");
+      setError(null);
+      setCrumbs([ROOT_CRUMB, { id: folder.id, name: folder.name }]);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "No se pudo abrir esa carpeta.");
+    } finally {
+      setResolvingLink(false);
+    }
   }
 
   function goToCrumb(index: number) {
@@ -195,6 +240,49 @@ export function DriveFolderConnect() {
         </p>
       )}
 
+      {/* Pegar el link. Va ARRIBA del árbol y no escondido detrás de un "avanzado": para una carpeta
+          que te compartieron es el único camino, porque el árbol de abajo solo baja por "Mi unidad". */}
+      {!summary && (
+        <div className="mt-3 rounded-lg border border-border bg-background p-2.5">
+          <label htmlFor="drive-folder-link" className="text-xs font-medium text-secondary">
+            Pegá el link de la carpeta
+          </label>
+          <div className="mt-1.5 flex items-center gap-2">
+            <input
+              id="drive-folder-link"
+              value={linkInput}
+              onChange={(e) => {
+                setLinkInput(e.target.value);
+                setLinkError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitLink();
+              }}
+              disabled={resolvingLink || connecting}
+              placeholder="https://drive.google.com/drive/folders/…"
+              className="min-w-0 flex-1 rounded-lg border border-border-strong px-3 py-1.5 text-sm text-secondary focus:border-accent focus:outline-none disabled:opacity-50"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={submitLink}
+              loading={resolvingLink}
+              disabled={!linkInput.trim() || connecting}
+            >
+              Abrir
+            </Button>
+          </div>
+          {linkError ? (
+            <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{linkError}</p>
+          ) : (
+            <p className="mt-1.5 text-xs text-tertiary">
+              Es la única forma de conectar una carpeta que te compartieron: esas no aparecen en la lista de acá
+              abajo, que solo recorre tu propia unidad.
+            </p>
+          )}
+        </div>
+      )}
+
       {summary ? (
         <div className="mt-4 space-y-2 text-sm">
           <p className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 font-medium text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200">
@@ -204,6 +292,11 @@ export function DriveFolderConnect() {
             <li>
               {summary.imported.projects} subcarpeta(s) y {summary.imported.transcriptions} nota(s) importadas.
             </li>
+            {!!summary.imported.audios && summary.imported.audios > 0 && (
+              <li>
+                {summary.imported.audios} audio(s) importados, listos para transcribir desde la pantalla principal.
+              </li>
+            )}
             {(summary.skipped.existingFolders > 0 || summary.skipped.existingFiles > 0) && (
               <li className="text-tertiary">
                 {summary.skipped.existingFolders} carpeta(s) y {summary.skipped.existingFiles} nota(s) ya estaban
