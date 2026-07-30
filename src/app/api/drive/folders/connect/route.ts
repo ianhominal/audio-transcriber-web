@@ -7,6 +7,8 @@ import { planDriveImport, type DriveImportPlan } from "@/lib/drive/tree";
 import { computeContentHash } from "@/lib/drive/reconcile";
 import { parseMarkdownExport, validateProjectName } from "@/lib/format";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { resolveRootProjectAction } from "@/lib/drive/connect-root";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,6 +18,40 @@ export const maxDuration = 60;
 const MAX_IMPORT_DEPTH = 20;
 
 type ConnectBody = { driveFolderId?: unknown; name?: unknown };
+
+/**
+ * Deja solo las filas de `drive_file_map` cuyo destino local SIGUE EXISTIENDO (no borrado).
+ *
+ * `drive_file_map` no tiene borrado en cascada desde `projects`/`transcriptions`, así que después de
+ * borrar un proyecto quedan filas apuntando a la nada. `planDriveImport` las lee como "esto ya está
+ * importado" y saltea justamente lo que habría que volver a traer: reconectar la carpeta terminaba
+ * importando CERO. Consultar las tablas reales cuesta dos queries y evita todo un árbol fantasma.
+ */
+async function filterMapRowsWithLiveTargets(
+  supabase: SupabaseClient,
+  rows: DriveFileMapRow[]
+): Promise<DriveFileMapRow[]> {
+  if (rows.length === 0) return rows;
+
+  const projectIds = rows.filter((r) => r.kind === "project").map((r) => r.local_id);
+  const transcriptionIds = rows.filter((r) => r.kind === "transcription").map((r) => r.local_id);
+
+  const [liveProjects, liveTranscriptions] = await Promise.all([
+    projectIds.length
+      ? supabase.from("projects").select("id").in("id", projectIds).is("deleted_at", null)
+      : Promise.resolve({ data: [] as { id: string }[] }),
+    transcriptionIds.length
+      ? supabase.from("transcriptions").select("id").in("id", transcriptionIds).is("deleted_at", null)
+      : Promise.resolve({ data: [] as { id: string }[] }),
+  ]);
+
+  const alive = new Set([
+    ...((liveProjects.data ?? []) as { id: string }[]).map((p) => p.id),
+    ...((liveTranscriptions.data ?? []) as { id: string }[]).map((t) => t.id),
+  ]);
+
+  return rows.filter((r) => alive.has(r.local_id));
+}
 
 type DriveFileMapRow = { drive_file_id: string; kind: "project" | "transcription"; local_id: string };
 type NewMapRow = {
@@ -65,6 +101,12 @@ export async function POST(req: NextRequest) {
     const accessToken = await getUserDriveAccessToken(supabase, user.id, { clientId, clientSecret, tokenKey });
 
     // ---- 1. Raíz: reusar si ya estaba conectada (reconexión idempotente) o crearla ----
+    //
+    // El mapeo se valida contra el proyecto REAL antes de reusarlo. Reporte real: conectar una
+    // carpeta respondía 200 y no aparecía nada en la lista ni refrescando — la fila de
+    // `drive_folders` seguía apuntando a un proyecto BORRADO en una prueba anterior, así que la
+    // importación entera caía dentro de un proyecto que estaba en la papelera. Un mapeo que apunta a
+    // la nada no es una reconexión: es un mapeo roto, y hay que rehacerlo (ver `resolveRootProjectAction`).
     const { data: existingRoot } = await supabase
       .from("drive_folders")
       .select("local_project_id")
@@ -72,9 +114,23 @@ export async function POST(req: NextRequest) {
       .eq("drive_folder_id", driveFolderId)
       .maybeSingle();
 
+    const mappedProjectId = (existingRoot?.local_project_id as string | undefined) ?? null;
+    let mappedProjectIsAlive = false;
+    if (mappedProjectId) {
+      const { data: mappedProject } = await supabase
+        .from("projects")
+        .select("id")
+        .eq("id", mappedProjectId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      mappedProjectIsAlive = !!mappedProject;
+    }
+
+    const rootAction = resolveRootProjectAction({ mappedProjectId, mappedProjectIsAlive });
+
     let rootProjectId: string;
-    if (existingRoot?.local_project_id) {
-      rootProjectId = existingRoot.local_project_id as string;
+    if (rootAction.action === "reuse") {
+      rootProjectId = rootAction.projectId;
     } else {
       const { data: project, error: projectError } = await supabase
         .from("projects")
@@ -87,15 +143,35 @@ export async function POST(req: NextRequest) {
       }
       rootProjectId = project.id as string;
 
-      const { error: folderError } = await supabase.from("drive_folders").insert({
-        user_id: user.id,
-        drive_folder_id: driveFolderId,
-        local_project_id: rootProjectId,
-        name: folderName,
-      });
-      if (folderError) {
-        console.error("[drive/folders/connect] error guardando drive_folders:", folderError.message);
-        return NextResponse.json({ error: "No se pudo registrar la conexión de la carpeta." }, { status: 500 });
+      if (rootAction.action === "recreate") {
+        // Repuntar el mapeo huérfano en vez de insertar uno nuevo: `drive_folders` ya tiene una fila
+        // para esta carpeta, y un INSERT chocaría con la unicidad (user_id, drive_folder_id).
+        console.warn("[drive/folders/connect] mapeo huérfano, se recrea el proyecto raíz", {
+          userId: user.id,
+          driveFolderId,
+          staleProjectId: rootAction.staleProjectId,
+        });
+        const { error: repointError } = await supabase
+          .from("drive_folders")
+          .update({ local_project_id: rootProjectId, name: folderName })
+          .eq("user_id", user.id)
+          .eq("drive_folder_id", driveFolderId);
+        if (repointError) {
+          console.error("[drive/folders/connect] error repuntando drive_folders:", repointError.message);
+          return NextResponse.json({ error: "No se pudo registrar la conexión de la carpeta." }, { status: 500 });
+        }
+
+      } else {
+        const { error: folderError } = await supabase.from("drive_folders").insert({
+          user_id: user.id,
+          drive_folder_id: driveFolderId,
+          local_project_id: rootProjectId,
+          name: folderName,
+        });
+        if (folderError) {
+          console.error("[drive/folders/connect] error guardando drive_folders:", folderError.message);
+          return NextResponse.json({ error: "No se pudo registrar la conexión de la carpeta." }, { status: 500 });
+        }
       }
     }
 
@@ -105,7 +181,14 @@ export async function POST(req: NextRequest) {
       .select("drive_file_id, kind, local_id")
       .eq("user_id", user.id)
       .is("deleted_at", null);
-    const mapRows = (mapRowsRaw ?? []) as DriveFileMapRow[];
+    const allMapRows = (mapRowsRaw ?? []) as DriveFileMapRow[];
+
+    // Un mapeo que apunta a algo BORRADO no cuenta como "ya importado". Sin este filtro, después de
+    // borrar un proyecto de Drive el mapa seguía diciendo que sus carpetas y notas estaban
+    // importadas, así que reconectar la carpeta no traía NADA — mismo síntoma que el mapeo huérfano
+    // de la raíz (bloque 1), con otra cara. Se verifica contra las tablas reales en vez de confiar
+    // en el mapa.
+    const mapRows = await filterMapRowsWithLiveTargets(supabase, allMapRows);
 
     const existingFolderIds = new Set(mapRows.filter((m) => m.kind === "project").map((m) => m.drive_file_id));
     const existingFileIds = new Set(mapRows.filter((m) => m.kind === "transcription").map((m) => m.drive_file_id));
