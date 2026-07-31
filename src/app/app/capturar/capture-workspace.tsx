@@ -9,10 +9,10 @@ import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icon";
 import { LocalRecordingsPanel } from "@/components/app/local-recordings-panel";
 import { formatDuration, formatRecordingFileName, defaultTitleFromFileName, formatFileSize } from "@/lib/format";
-import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
+import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType } from "@/lib/recording";
 import { saveRecording, updateRecording } from "@/lib/recordings/db";
 import { uploadStoredRecording } from "@/lib/recordings/flow";
-import { classifyUploadFailure } from "@/lib/recordings/policy";
+import { chooseUploadRoute, TRANSCRIBE_MAX_BYTES } from "@/lib/recordings/route";
 import type { TranscriptionDefaults } from "@/lib/settings/user-settings";
 
 type Phase = "idle" | "requesting" | "recording" | "saving" | "uploading" | "done" | "error";
@@ -163,18 +163,18 @@ export function CaptureWorkspace({
       setStored({ id: saved.id, title });
       refreshLibrary();
 
-      // Demasiado grande para la web: NO se intenta subir (la plataforma la rechaza en el borde),
-      // pero el audio ya está a salvo en el dispositivo y se puede bajar desde la biblioteca.
-      if (file.size > WEB_MAX_BYTES) {
-        const { message: reason } = classifyUploadFailure(413, "");
+      // Lo que supera el body de Vercel (~4,5 MB) ya NO se rechaza: sube directo a Storage y se
+      // transcribe desde ahí (ver `chooseUploadRoute`/`postFile`). Solo se corta acá lo que Groq
+      // tampoco aceptaría, y en ese caso el audio ya está a salvo en la biblioteca del dispositivo.
+      if (chooseUploadRoute(file.size) === "too-large") {
+        const reason =
+          `Esta grabación pesa ${formatFileSize(file.size)} y el máximo para transcribir por la web ` +
+          `es ${formatFileSize(TRANSCRIBE_MAX_BYTES)}. No la perdiste: quedó guardada en este ` +
+          `dispositivo, bajala y transcribila con la app de escritorio, que no tiene límite.`;
         await updateRecording(saved.id, { status: "too_large", lastError: reason });
         refreshLibrary();
         setPhase("error");
-        setMessage(
-          `Esta grabación pesa ${formatFileSize(file.size)} y por la web solo se pueden subir hasta ` +
-            `${formatFileSize(WEB_MAX_BYTES)}. No la perdiste: quedó guardada en este dispositivo, ` +
-            `bajala y transcribila con la app de escritorio, que no tiene límite de tamaño.`
-        );
+        setMessage(reason);
         return;
       }
 

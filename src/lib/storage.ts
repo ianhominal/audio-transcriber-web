@@ -18,7 +18,18 @@ export function buildAudioObjectPath(userId: string, objectId: string, ext: stri
  * Extensiones de audio conocidas aceptadas por `/api/audio/prepare` (subida directa a Storage
  * desde el desktop, salteando el body de la función de Vercel — tope duro ~4,5 MB).
  */
-export const ALLOWED_AUDIO_EXTENSIONS = ["ogg", "opus", "wav", "mp3", "m4a", "webm", "aac"] as const;
+/**
+ * Extensiones que pueden llegar a Storage por el flujo de subida directa (`/api/audio/prepare`).
+ *
+ * Tiene que cubrir TODO lo que `/api/transcribe` acepta (ver `src/lib/transcribe/accept.ts`): si un
+ * formato se puede transcribir pero no se puede subir, los archivos de más de ~4,5 MB de ese
+ * formato quedan sin camino posible — el body de Vercel no los aguanta y el signed URL los rechaza.
+ * Los contenedores de video están a propósito: Whisper les extrae la pista de audio.
+ */
+export const ALLOWED_AUDIO_EXTENSIONS = [
+  "ogg", "opus", "wav", "mp3", "m4a", "webm", "aac",
+  "mp4", "mpeg", "mpga", "flac",
+] as const;
 
 /**
  * true si `ext` tiene el formato ".xxx" (un punto seguido de letras/números) Y está en la

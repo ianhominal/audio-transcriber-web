@@ -13,10 +13,10 @@ import {
   normalizeQueueTitle,
   resolveQueueTitle,
 } from "@/lib/format";
-import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType, WEB_MAX_BYTES } from "@/lib/recording";
+import { AUDIO_MIME_CANDIDATES, pickSupportedMimeType, extensionForMimeType } from "@/lib/recording";
 import { saveRecording, updateRecording } from "@/lib/recordings/db";
-import { postRecording } from "@/lib/recordings/upload";
-import { recordUploadOutcome } from "@/lib/recordings/flow";
+import { chooseUploadRoute } from "@/lib/recordings/route";
+import { postFile, recordUploadOutcome } from "@/lib/recordings/flow";
 import type { LocalRecordingSource } from "@/lib/recordings/types";
 import { FILE_ACCEPT } from "@/lib/transcribe/accept";
 import { Button } from "@/components/ui/Button";
@@ -427,11 +427,11 @@ export function TranscribeWorkspace({
     let qualityWarning: string | null = null;
     let qualityWarningCount = 0;
     for (const item of toProcess) {
-      // Los archivos grandes no pasan por la web (límite de Vercel): se derivan a la app. Si era
-      // una grabación, en la biblioteca del dispositivo queda marcada como tal — así deja de
-      // ofrecer un reintento que volvería a fallar en este mismo chequeo, y ofrece descargarla.
-      if (item.file.size > WEB_MAX_BYTES) {
-        const reason = "Muy grande para la web. Usá la app de escritorio.";
+      // El techo ya NO es el body de Vercel (~4,5 MB): lo que no entra ahí sube DIRECTO a Storage
+      // y se transcribe desde ahí (ver `postFile`/`chooseUploadRoute`). El único tope real es el
+      // de Groq, 25 MB. Solo se rechaza acá lo que Groq tampoco aceptaría.
+      if (chooseUploadRoute(item.file.size) === "too-large") {
+        const reason = `Pesa más de 25 MB. Transcribilo con la app de escritorio, que no tiene límite.`;
         patch(item.key, { status: "error", error: reason });
         if (item.localId) await updateRecording(item.localId, { status: "too_large", lastError: reason });
         failCount++;
@@ -439,23 +439,21 @@ export function TranscribeWorkspace({
       }
       patch(item.key, { status: "working", error: undefined });
       try {
-        const form = new FormData();
-        form.append("file", item.file);
-        form.append("language", language);
-        form.append("model", model);
-        form.append("mode", mode);
-        if (mode === "translate") form.append("targetLanguage", targetLanguage);
-        form.append("useVocabulary", String(useVocabulary));
-        // Toda la cola (archivos subidos y grabaciones) hereda el mismo proyecto destino del
-        // lote, elegido en el selector de arriba.
-        if (projectId) form.append("projectId", projectId);
-        if (item.title) form.append("title", item.title);
-
-        // `postRecording` lee la respuesta como TEXTO y recién ahí la interpreta: la plataforma
-        // rechaza los payloads grandes en el borde con texto plano ("Request Entity Too Large"), y
-        // el `await resp.json()` que había acá explotaba con un error de parseo que tapaba la causa
-        // real. Ver `src/lib/recordings/upload.ts`.
-        const outcome = await postRecording(form);
+        // `postFile` elige solo el camino según el tamaño (body directo o subida previa a
+        // Storage), y lee la respuesta como TEXTO antes de interpretarla: la plataforma rechaza
+        // los payloads grandes en el borde con texto plano ("Request Entity Too Large"), y el
+        // `await resp.json()` que había acá explotaba tapando la causa real.
+        const outcome = await postFile(item.file, {
+          language,
+          model,
+          mode,
+          // Toda la cola (archivos subidos y grabaciones) hereda el mismo proyecto destino del
+          // lote, elegido en el selector de arriba.
+          title: item.title,
+          projectId: projectId ?? undefined,
+          targetLanguage: mode === "translate" ? targetLanguage : undefined,
+          useVocabulary,
+        });
         await recordUploadOutcome(item.localId, outcome);
         if (!outcome.ok) throw new Error(outcome.message);
 
@@ -522,7 +520,10 @@ export function TranscribeWorkspace({
   const dashboardHref = destino && destino !== "__new__" ? `/app?project=${destino}` : "/app";
   const doneCount = items.filter((i) => i.status === "done" || i.status === "duplicate").length;
   const allDone = items.length > 0 && items.every((i) => i.status !== "pending" && i.status !== "working");
-  const hasOversize = items.some((i) => i.file.size > WEB_MAX_BYTES);
+  // Solo lo que Groq NO va a aceptar (25 MB). Antes el umbral era el body de Vercel (~4,5 MB) y el
+  // aviso mandaba a la app de escritorio audios que ahora la web sí transcribe, subiéndolos directo
+  // a Storage (ver `chooseUploadRoute`).
+  const hasOversize = items.some((i) => chooseUploadRoute(i.file.size) === "too-large");
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
@@ -876,12 +877,12 @@ export function TranscribeWorkspace({
         ))}
       </ul>
 
-      {/* Derivación a la app de escritorio para archivos grandes (límite de Vercel) */}
+      {/* Derivación a la app de escritorio para lo que supera el límite de Groq (25 MB) */}
       {hasOversize && (
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
           <Icon name="warning" className="mt-0.5 shrink-0" />
           <p>
-            Algunos audios pesan más de 4,5 MB y la web no los soporta.{" "}
+            Algunos audios pesan más de 25 MB y la web no los soporta.{" "}
             <Link href="/descargar" className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100">
               Descargá la app de escritorio
             </Link>{" "}

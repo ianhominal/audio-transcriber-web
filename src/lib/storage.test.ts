@@ -59,6 +59,15 @@ describe("isAllowedAudioExtension", () => {
     expect(isAllowedAudioExtension(".Mp3")).toBe(true);
   });
 
+  // Si un formato se puede transcribir pero no subir a Storage, los archivos grandes de ese
+  // formato quedan sin camino: no entran en el body de Vercel y el signed URL los rechaza.
+  it("cubre los contenedores de video que /api/transcribe acepta (Whisper les saca el audio)", () => {
+    expect(isAllowedAudioExtension(".mp4")).toBe(true);
+    expect(isAllowedAudioExtension(".mpeg")).toBe(true);
+    expect(isAllowedAudioExtension(".mpga")).toBe(true);
+    expect(isAllowedAudioExtension(".flac")).toBe(true);
+  });
+
   it("rechaza extensiones desconocidas", () => {
     expect(isAllowedAudioExtension(".exe")).toBe(false);
     expect(isAllowedAudioExtension(".txt")).toBe(false);

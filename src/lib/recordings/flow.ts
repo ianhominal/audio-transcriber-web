@@ -7,6 +7,8 @@
 import type { LocalRecording, LocalRecordingMeta } from "./types";
 import { getRecording, getRecordingMeta, updateRecording } from "./db";
 import { postRecording, type UploadOutcome } from "./upload";
+import { chooseUploadRoute } from "./route";
+import { uploadFileToStorage } from "./storage-upload";
 
 /** Fields `/api/transcribe` expects alongside the audio. Mirrors both capture surfaces. */
 export type TranscribeFields = {
@@ -22,6 +24,27 @@ export type TranscribeFields = {
 export function buildTranscribeForm(file: File, fields: TranscribeFields): FormData {
   const form = new FormData();
   form.append("file", file, file.name);
+  return appendCommonFields(form, fields);
+}
+
+/**
+ * Same fields, but pointing at a file already sitting in Storage (see `storage-upload.ts`). The
+ * audio never travels through Vercel's body, so this is the path for anything over ~4.5 MB.
+ * `audioName` matters here: the object in Storage is named with a UUID, so this is the name the
+ * server actually stores.
+ */
+export function buildStorageTranscribeForm(
+  storagePath: string,
+  audioName: string,
+  fields: TranscribeFields
+): FormData {
+  const form = new FormData();
+  form.append("storagePath", storagePath);
+  form.append("audioName", audioName);
+  return appendCommonFields(form, fields);
+}
+
+function appendCommonFields(form: FormData, fields: TranscribeFields): FormData {
   form.append("language", fields.language);
   form.append("model", fields.model);
   form.append("mode", fields.mode);
@@ -83,7 +106,34 @@ export async function uploadStoredRecording(id: string, fields: TranscribeFields
   if (!recording) {
     return { ok: false, status: "failed", message: "Esa grabación ya no está en este dispositivo.", rescuedId: null };
   }
-  const outcome = await postRecording(buildTranscribeForm(toFile(recording), fields));
+  const outcome = await postFile(toFile(recording), fields);
   await updateRecording(id, nextMetaAfterUpload(outcome, recording.attempts));
   return outcome;
+}
+
+/**
+ * Sends a file the right way for its size (see `chooseUploadRoute`): small ones in the request
+ * body, bigger ones straight to Storage first. The caller does not have to care which.
+ */
+export async function postFile(file: File, fields: TranscribeFields): Promise<UploadOutcome> {
+  const route = chooseUploadRoute(file.size);
+
+  if (route === "too-large") {
+    return {
+      ok: false,
+      status: "too_large",
+      message: `Este audio pesa ${Math.round(file.size / 1024 / 1024)} MB y el máximo es 25 MB. Transcribilo con la app de escritorio, que no tiene límite.`,
+      rescuedId: null,
+    };
+  }
+
+  if (route === "storage") {
+    const uploaded = await uploadFileToStorage(file);
+    if (!uploaded.ok) {
+      return { ok: false, status: "failed", message: uploaded.message, rescuedId: null };
+    }
+    return postRecording(buildStorageTranscribeForm(uploaded.path, file.name, fields));
+  }
+
+  return postRecording(buildTranscribeForm(file, fields));
 }
