@@ -7,6 +7,7 @@
  */
 
 import { classifyUploadFailure } from "./policy";
+import { describeFetchFailure } from "./fetch-failure";
 
 export type UploadSuccess = {
   ok: true;
@@ -90,8 +91,12 @@ export async function postRecording(form: FormData): Promise<UploadOutcome> {
   let response: Response;
   try {
     response = await fetch("/api/transcribe", { method: "POST", body: form });
-  } catch {
-    return interpretUploadResponse(null, "");
+  } catch (err) {
+    // The exception is NOT discarded: `fetch` rejecting can mean a dead network OR a file handle
+    // the phone already invalidated, and the two need opposite advice. Throwing it away is what
+    // left us blind when 14 uploads failed in a row without a single request reaching the server.
+    const failure = describeFetchFailure(err);
+    return { ok: false, status: "failed", message: failure.message, rescuedId: null };
   }
   // `.text()` can itself fail on a connection cut mid-body; treat that as a network failure too.
   const rawBody = await response.text().catch(() => "");

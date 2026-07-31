@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { UIMessage } from "ai";
 import { formatDate, formatFileSize, buildMarkdownExport, slugifyFileName } from "@/lib/format";
+import { resolveMediaKind } from "@/lib/media-kind";
 import { buildNoteMarkdown, buildNotePlainText, summaryToMarkdown } from "@/lib/noteExport";
 import { requestGoogleDriveAccessToken, uploadMarkdownToDrive, DriveAuthError } from "@/lib/googleDrive";
 import {
@@ -742,9 +743,18 @@ export function TranscriptionDetail({
         className="mt-4 w-full resize-y rounded-lg border border-border-strong p-3 text-sm text-secondary focus:border-accent focus:outline-none"
       />
 
-      {/* Reproductor: usa una URL firmada temporal (bucket privado). */}
+      {/* Reproductor: usa una URL firmada temporal (bucket privado).
+
+          El elemento se elige según el tipo de archivo (ver `resolveMediaKind`): se pueden
+          transcribir videos a propósito —Whisper les saca la pista de audio—, pero un `<audio>`
+          con un contenedor de video queda a merced del navegador y a veces no carga nada. Una
+          tester real reportó justamente que "el botón de reproducir no funciona con videos". */}
       {audioSrc ? (
-        <audio controls src={audioSrc} className="mt-4 w-full" />
+        resolveMediaKind(audioSrc) === "video" ? (
+          <video controls src={audioSrc} className="mt-4 max-h-80 w-full rounded-lg bg-black" />
+        ) : (
+          <audio controls src={audioSrc} className="mt-4 w-full" />
+        )
       ) : (
         <p className="mt-4 flex items-center gap-1.5 rounded-lg bg-background px-3 py-2 text-xs text-tertiary">
           <Icon name="headphones" className="shrink-0" />
